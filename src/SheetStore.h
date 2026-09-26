@@ -20,6 +20,10 @@ struct PlaceRecord
     // the corner a hole punch goes through and it survives a window resize.
     QPointF hole;
     bool hasHole = false;
+    // A note torn off onto the desktop: where it sits, in logical screen
+    // coordinates.
+    QPoint desk;
+    bool onDesk = false;
 
     bool hasWriting() const;
 };
@@ -48,6 +52,12 @@ public:
     void setHole(const QString &key, const QPointF &hole);
     // The page closed: its blank sheets go with it.
     void dropBlanks(const QString &key);
+
+    // Desk notes live under keys of their own, "desk:" and an id.
+    QString newDeskNote(const QStringList &sheets, const QPoint &at);
+    void setDesk(const QString &key, const QPoint &at);
+    QStringList deskKeys() const;
+    void forget(const QString &key);
 
     // Where a place that has never had a hole gets one: where the last hole
     // was put.

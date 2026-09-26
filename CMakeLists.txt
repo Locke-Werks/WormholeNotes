@@ -23,6 +23,8 @@ set(WORMHOLENOTES_SOURCES
     src/SheetStore.h
     src/HoleWindow.cpp
     src/HoleWindow.h
+    src/DeskNote.cpp
+    src/DeskNote.h
     src/NoteWindow.cpp
     src/NoteWindow.h
     src/NoteFace.cpp

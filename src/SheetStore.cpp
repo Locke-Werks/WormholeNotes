@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QUuid>
 
 namespace {
 
@@ -78,6 +79,11 @@ void SheetStore::load()
             record.hole = QPointF(hole.at(0).toDouble(), hole.at(1).toDouble());
             record.hasHole = true;
         }
+        const QJsonArray desk = o.value(QStringLiteral("desk")).toArray();
+        if (desk.size() == 2) {
+            record.desk = QPoint(desk.at(0).toInt(), desk.at(1).toInt());
+            record.onDesk = true;
+        }
         m_places.insert(it.key(), record);
     }
 }
@@ -97,14 +103,16 @@ void SheetStore::flush()
                 sheets.append(sheet);
         }
         // Nothing written and the hole where new places put one anyway:
-        // nothing worth keeping.
-        if (sheets.isEmpty() && !record.hasHole)
+        // nothing worth keeping. A desk note is nothing but its writing.
+        if (sheets.isEmpty() && (!record.hasHole || record.onDesk))
             continue;
         QJsonObject o;
         o.insert(QStringLiteral("label"), record.label);
         o.insert(QStringLiteral("sheets"), sheets);
         if (record.hasHole)
             o.insert(QStringLiteral("hole"), QJsonArray{ record.hole.x(), record.hole.y() });
+        if (record.onDesk)
+            o.insert(QStringLiteral("desk"), QJsonArray{ record.desk.x(), record.desk.y() });
         places.insert(it.key(), o);
     }
     QJsonObject root;
@@ -179,6 +187,42 @@ void SheetStore::dropBlanks(const QString &key)
     it->sheets.removeIf(blank);
     if (it->sheets.isEmpty() && !it->hasHole)
         m_places.erase(it);
+}
+
+QString SheetStore::newDeskNote(const QStringList &sheets, const QPoint &at)
+{
+    const QString key = QStringLiteral("desk:") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    PlaceRecord &record = m_places[key];
+    record.sheets = sheets;
+    record.desk = at;
+    record.onDesk = true;
+    touch();
+    return key;
+}
+
+void SheetStore::setDesk(const QString &key, const QPoint &at)
+{
+    PlaceRecord &record = m_places[key];
+    record.desk = at;
+    record.onDesk = true;
+    touch();
+}
+
+QStringList SheetStore::deskKeys() const
+{
+    QStringList keys;
+    for (auto it = m_places.cbegin(); it != m_places.cend(); ++it) {
+        if (it->onDesk && it->hasWriting())
+            keys.append(it.key());
+    }
+    keys.sort();
+    return keys;
+}
+
+void SheetStore::forget(const QString &key)
+{
+    if (m_places.remove(key))
+        touch();
 }
 
 void SheetStore::touch()

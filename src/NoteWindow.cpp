@@ -21,6 +21,10 @@
 
 #include <cmath>
 
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
 namespace {
 
 constexpr int kMargin = 16; // room outside the rim for the shadow and the clip
@@ -223,6 +227,7 @@ NoteWindow::NoteWindow(QWidget *parent)
     m_menu->addSeparator();
     m_menu->addAction(tr("New Sheet\tCtrl+N"), this, [this] { pressPusher(NewPusher); });
     m_menu->addAction(tr("Delete Sheet"), this, [this] { pressPusher(DeletePusher); });
+    m_menu->addAction(tr("Tear Off to Desktop"), this, &NoteWindow::tearOffRequested);
     m_menu->addAction(tr("Put Away\tEsc"), this, [this] { pressPusher(AwayPusher); });
     m_menu->addSeparator();
     m_menu->addAction(tr("About WormholeNotes"), this, &NoteWindow::about);
@@ -777,6 +782,23 @@ void NoteWindow::keyPressEvent(QKeyEvent *event)
         return;
     }
     QWidget::keyPressEvent(event);
+}
+
+// Dragging the rim is Windows' own move loop, which Qt sees no mouse release
+// from. The end of the loop is how a drop is noticed.
+bool NoteWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
+{
+    const auto *msg = static_cast<const MSG *>(message);
+    if (msg->message == WM_EXITSIZEMOVE)
+        QTimer::singleShot(0, this, &NoteWindow::moved);
+    return QWidget::nativeEvent(eventType, message, result);
+}
+
+QPoint NoteWindow::physicalCenter() const
+{
+    RECT r{};
+    GetWindowRect(HWND(winId()), &r);
+    return QPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
 }
 
 void NoteWindow::closeEvent(QCloseEvent *event)

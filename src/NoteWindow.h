@@ -45,6 +45,8 @@ public:
     // pulled in as far as needed to stay on that screen.
     void openAt(const QPoint &globalCenter);
     void putAway();
+    // Its centre, in physical pixels.
+    QPoint physicalCenter() const;
 
 Q_SIGNALS:
     void textEdited(const QString &text);
@@ -56,6 +58,9 @@ Q_SIGNALS:
     void sheetTurnRequested(int direction);
     void newSheetRequested();
     void deleteSheetRequested();
+    void tearOffRequested();
+    // The user finished dragging the note by its rim.
+    void moved();
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -68,6 +73,7 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
     void changeEvent(QEvent *event) override;
+    bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 
 private:
     enum Pusher { NewPusher, DeletePusher, AwayPusher, PusherCount };

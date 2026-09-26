@@ -539,6 +539,58 @@ void PlaceTracker::close(const QString &key)
     emit openPlacesChanged();
 }
 
+quintptr PlaceTracker::windowAt(const QPoint &physical) const
+{
+    struct Search
+    {
+        const PlaceTracker *tracker;
+        POINT point;
+        quintptr found;
+    } search{ this, { physical.x(), physical.y() }, 0 };
+
+    // Top to bottom through the stack, so the first window that contains the
+    // point is the one showing there.
+    EnumWindows(
+        [](HWND hwnd, LPARAM data) -> BOOL {
+            auto *s = reinterpret_cast<Search *>(data);
+            if (!IsWindowVisible(hwnd) || IsIconic(hwnd))
+                return TRUE;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(hwnd, &pid);
+            if (pid == GetCurrentProcessId())
+                return TRUE;
+            BOOL cloaked = FALSE;
+            DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof cloaked);
+            if (cloaked || (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TRANSPARENT))
+                return TRUE;
+            RECT r{};
+            if (FAILED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof r)))
+                GetWindowRect(hwnd, &r);
+            if (!PtInRect(&r, s->point))
+                return TRUE;
+            const QString cls = windowClass(hwnd);
+            if (cls == QLatin1String("Progman") || cls == QLatin1String("WorkerW")) {
+                s->found = 0;
+                return FALSE;
+            }
+            if (kTransientClasses.contains(cls))
+                return TRUE;
+            s->found = quintptr(hwnd);
+            return FALSE;
+        },
+        LPARAM(&search));
+    return search.found;
+}
+
+bool PlaceTracker::placeOf(quintptr hwnd, Place *place) const
+{
+    Window w;
+    if (!describe(hwnd, &w, false) || w.desktop)
+        return false;
+    *place = w.browser ? browserPlace(w, m_pageOf.value(w.hwnd)) : appPlace(w);
+    return true;
+}
+
 QList<Place> PlaceTracker::openPlaces() const
 {
     struct Entry

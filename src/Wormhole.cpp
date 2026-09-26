@@ -1,5 +1,6 @@
 #include "Wormhole.h"
 
+#include "DeskNote.h"
 #include "HoleWindow.h"
 #include "NoteWindow.h"
 
@@ -32,11 +33,15 @@ Wormhole::Wormhole(QObject *parent)
     connect(m_note, &NoteWindow::newSheetRequested, this, &Wormhole::newSheet);
     connect(m_note, &NoteWindow::deleteSheetRequested, this, &Wormhole::deleteSheet);
     connect(m_note, &NoteWindow::placeTurned, this, &Wormhole::turnPlace);
+    connect(m_note, &NoteWindow::tearOffRequested, this, &Wormhole::tearOff);
+    connect(m_note, &NoteWindow::moved, this, &Wormhole::onNoteMoved);
     connect(m_note, &NoteWindow::textEdited, this, [this](const QString &text) {
         const bool wasWritten = m_store.place(m_viewKey).hasWriting();
         m_store.setSheet(m_viewKey, m_viewLabel, m_sheet, text);
         if (wasWritten != m_store.place(m_viewKey).hasWriting())
             updateRing();
+        if (DeskNote *desk = m_desk.value(m_viewKey))
+            desk->setText(m_store.place(m_viewKey).sheets.constFirst());
     });
 
     m_tray = new QSystemTrayIcon(QApplication::windowIcon(), this);
@@ -55,6 +60,7 @@ Wormhole::Wormhole(QObject *parent)
 Wormhole::~Wormhole()
 {
     m_store.flush();
+    qDeleteAll(m_desk);
     delete m_tray->contextMenu();
     delete m_note;
     delete m_hole;
@@ -63,6 +69,8 @@ Wormhole::~Wormhole()
 void Wormhole::start()
 {
     m_store.load();
+    for (const QString &key : m_store.deskKeys())
+        createDeskNote(key);
     m_tray->show();
     m_tracker.start();
     if (m_place.key.isEmpty()) {
@@ -188,12 +196,15 @@ void Wormhole::deleteSheet()
 void Wormhole::turnPlace(const QString &key)
 {
     leaveSheet();
-    QString label = key;
+    const QString left = m_viewKey;
+    QString label = isDesk(key) ? deskLabel(key) : key;
     for (const Place &place : m_tracker.openPlaces()) {
         if (place.key == key)
             label = place.label;
     }
     view(key, label, m_lastSheet.value(key, 0));
+    if (isDesk(left))
+        settleDesk(left);
 }
 
 void Wormhole::updateRing()
@@ -204,6 +215,14 @@ void Wormhole::updateRing()
         if (place.key == m_viewKey)
             current = int(ring.size());
         ring.append({ place.key, place.label, m_store.place(place.key).hasWriting() });
+        // Desk notes are on the desktop, so they follow it round the ring.
+        if (place.isDesktop()) {
+            for (const QString &key : m_store.deskKeys()) {
+                if (key == m_viewKey)
+                    current = int(ring.size());
+                ring.append({ key, deskLabel(key), true });
+            }
+        }
     }
     m_note->setRing(ring, current);
 }
@@ -215,6 +234,8 @@ void Wormhole::putNoteAway()
     leaveSheet();
     const bool hadFocus = m_note->isActiveWindow();
     m_note->putAway();
+    if (isDesk(m_viewKey))
+        settleDesk(m_viewKey);
     // Hand the foreground back to the window the note came from. Left alone,
     // Windows keeps it on the hidden note, and the next app the user picks is
     // measured against that instead of the place they were on.
@@ -222,6 +243,120 @@ void Wormhole::putNoteAway()
         SetForegroundWindow(HWND(m_place.hwnd));
     updateHole();
     reposition();
+}
+
+// ---------------------------------------------------------------------------
+// Desk notes
+
+bool Wormhole::isDesk(const QString &key) const
+{
+    return key.startsWith(QLatin1String("desk:"));
+}
+
+QString Wormhole::deskLabel(const QString &key) const
+{
+    for (const QString &sheet : m_store.place(key).sheets) {
+        const QString line = sheet.trimmed().section(u'\n', 0, 0).trimmed();
+        if (!line.isEmpty())
+            return line.length() > 28 ? line.left(27) + QChar(0x2026) : line;
+    }
+    return tr("Desk note");
+}
+
+void Wormhole::createDeskNote(const QString &key)
+{
+    auto *desk = new DeskNote;
+    const PlaceRecord record = m_store.place(key);
+    desk->setText(record.sheets.constFirst());
+    desk->centerOn(record.desk);
+    connect(desk, &DeskNote::clicked, this, [this, key] { openDeskNote(key); });
+    connect(desk, &DeskNote::dropped, this, [this, key] { onDeskNoteDropped(key); });
+    m_desk.insert(key, desk);
+    desk->show();
+}
+
+void Wormhole::openDeskNote(const QString &key)
+{
+    DeskNote *desk = m_desk.value(key);
+    if (!desk)
+        return;
+    putNoteAway();
+    view(key, deskLabel(key), m_lastSheet.value(key, 0));
+    desk->hide();
+    m_note->openAt(desk->logicalCenter());
+}
+
+void Wormhole::settleDesk(const QString &key)
+{
+    DeskNote *desk = m_desk.value(key);
+    if (!desk)
+        return;
+    const PlaceRecord record = m_store.place(key);
+    if (!record.hasWriting()) {
+        m_store.forget(key);
+        m_desk.remove(key);
+        desk->deleteLater();
+        return;
+    }
+    desk->setText(record.sheets.constFirst());
+    desk->show();
+}
+
+void Wormhole::onDeskNoteDropped(const QString &key)
+{
+    DeskNote *desk = m_desk.value(key);
+    if (!desk)
+        return;
+    Place target;
+    const quintptr hwnd = m_tracker.windowAt(desk->physicalCenter());
+    if (!hwnd || !m_tracker.placeOf(hwnd, &target)) {
+        // Still on the desktop: it only moved.
+        m_store.setDesk(key, desk->logicalCenter());
+        return;
+    }
+    // Dropped on a window: its writing joins that place's sheets.
+    for (const QString &sheet : m_store.place(key).sheets) {
+        if (sheet.trimmed().isEmpty())
+            continue;
+        const PlaceRecord there = m_store.place(target.key);
+        const int index = there.sheets.size() == 1 && there.sheets.constFirst().trimmed().isEmpty()
+            ? 0
+            : m_store.addSheet(target.key, target.label);
+        m_store.setSheet(target.key, target.label, index, sheet);
+    }
+    m_store.forget(key);
+    m_desk.remove(key);
+    desk->deleteLater();
+    if (target.key == m_place.key)
+        updateHole();
+}
+
+void Wormhole::tearOff()
+{
+    if (isDesk(m_viewKey))
+        return;
+    const QString text = m_note->text();
+    if (text.trimmed().isEmpty())
+        return;
+    const QPoint at = m_note->geometry().center();
+    const QString key = m_store.newDeskNote({ text }, at);
+    // The sheet leaves the page, which is left with a fresh blank if that
+    // was its only one.
+    m_store.removeSheet(m_viewKey, m_sheet);
+    m_sheet = qMin(m_sheet, int(m_store.place(m_viewKey).sheets.size()) - 1);
+    m_lastSheet.insert(m_viewKey, m_sheet);
+    createDeskNote(key);
+    putNoteAway();
+}
+
+// A note dropped where only the desktop shows is torn off there. Moving it
+// aside over another window is just moving it.
+void Wormhole::onNoteMoved()
+{
+    if (!m_note->isVisible() || isDesk(m_viewKey))
+        return;
+    if (m_tracker.windowAt(m_note->physicalCenter()) == 0)
+        tearOff();
 }
 
 void Wormhole::onHoleDragged(const QPoint &c)

@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QObject>
 
+class DeskNote;
 class HoleWindow;
 class NoteWindow;
 class QSystemTrayIcon;
@@ -49,6 +50,18 @@ private:
     void updateRing();
     void updateHole();
 
+    // Notes torn off onto the desktop.
+    bool isDesk(const QString &key) const;
+    QString deskLabel(const QString &key) const;
+    void createDeskNote(const QString &key);
+    void openDeskNote(const QString &key);
+    // A desk note that is no longer being looked at goes back on the desk,
+    // or away altogether when nothing is left written on it.
+    void settleDesk(const QString &key);
+    void onDeskNoteDropped(const QString &key);
+    void tearOff();
+    void onNoteMoved();
+
     PlaceTracker m_tracker;
     SheetStore m_store;
     Place m_place;
@@ -56,6 +69,7 @@ private:
     QString m_viewLabel;
     int m_sheet = 0;
     QHash<QString, int> m_lastSheet;
+    QHash<QString, DeskNote *> m_desk;
     HoleWindow *m_hole = nullptr;
     NoteWindow *m_note = nullptr;
     QSystemTrayIcon *m_tray = nullptr;

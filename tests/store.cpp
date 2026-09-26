@@ -70,6 +70,24 @@ int main(int argc, char *argv[])
               "a sheet can be deleted");
     }
 
+    {
+        SheetStore store;
+        store.load();
+        const QString desk = store.newDeskNote({ QStringLiteral("torn off") }, QPoint(300, 400));
+        check(store.deskKeys() == QStringList{ desk }, "a torn-off note is a desk note");
+        store.flush();
+        SheetStore again;
+        again.load();
+        check(again.place(desk).onDesk && again.place(desk).desk == QPoint(300, 400), "a desk note keeps its spot");
+        again.forget(desk);
+        check(again.deskKeys().isEmpty(), "a desk note dragged back onto a page is gone from the desk");
+        const QString blank = again.newDeskNote({ QString() }, QPoint(1, 1));
+        again.flush();
+        SheetStore third;
+        third.load();
+        check(!third.deskKeys().contains(blank), "a blank desk note is not kept");
+    }
+
     QFile::remove(SheetStore().path());
     return failures == 0 ? 0 : 1;
 }

@@ -47,6 +47,12 @@ public:
     // taskbar follows, in the order it appeared.
     QList<Place> openPlaces() const;
 
+    // The top-level window that shows at a point on screen, in physical
+    // pixels, looking through our own windows. 0 when it is the desktop.
+    quintptr windowAt(const QPoint &physical) const;
+    // The place a window belongs to. False for windows that are not a place.
+    bool placeOf(quintptr hwnd, Place *place) const;
+
     // The tracked window's frame on screen in physical pixels, and its DPI.
     // Empty when the window is minimized or gone, which hides the hole.
     QRect anchorRect(int *dpi = nullptr) const;
