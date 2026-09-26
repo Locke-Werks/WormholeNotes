@@ -210,6 +210,35 @@ void BrowserReader::readAddress(quintptr hwnd)
     emit addressRead(hwnd, page);
 }
 
+void BrowserReader::readTaskbar()
+{
+    if (!ensure())
+        return;
+    HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+    // Windows 11 draws the buttons in a XAML island inside the taskbar; the
+    // taskbar window itself only holds an empty pane for them.
+    HWND island = tray ? FindWindowExW(tray, nullptr, L"Windows.UI.Composition.DesktopWindowContentBridge", nullptr) : nullptr;
+    IUIAutomationElement *root = nullptr;
+    if (!tray || FAILED(m_automation->ElementFromHandle(island ? island : tray, &root)) || !root)
+        return;
+    // Each window's button names the window itself: "Window: 0x504a0".
+    QList<quintptr> windows;
+    walk(m_automation, root, [&](IUIAutomationElement *element, CONTROLTYPEID type) {
+        if (type != UIA_ButtonControlTypeId)
+            return true;
+        const QString id = bstrProperty(element, UIA_AutomationIdPropertyId);
+        if (id.startsWith(QLatin1String("Window: 0x"))) {
+            bool ok = false;
+            const quintptr hwnd = id.mid(10).toULongLong(&ok, 16);
+            if (ok)
+                windows.append(hwnd);
+        }
+        return true;
+    });
+    root->Release();
+    emit taskbarRead(windows);
+}
+
 void BrowserReader::readTabs(QList<quintptr> hwnds)
 {
     if (!ensure())

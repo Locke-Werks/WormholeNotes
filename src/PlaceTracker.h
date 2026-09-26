@@ -42,9 +42,9 @@ public:
     void start();
     Place current() const { return m_place; }
 
-    // Open places in ring order: the desktop first, then in the order they
-    // appeared, which follows the taskbar for anything that has not been
-    // dragged along it.
+    // Open places in ring order: the desktop first, then taskbar order, with
+    // a browser's pages together where its button is. Anything not on the
+    // taskbar follows, in the order it appeared.
     QList<Place> openPlaces() const;
 
     // The tracked window's frame on screen in physical pixels, and its DPI.
@@ -60,6 +60,7 @@ Q_SIGNALS:
 
     void requestAddress(quintptr hwnd);
     void requestTabs(QList<quintptr> hwnds);
+    void requestTaskbar();
 
 private:
     friend struct PlaceTrackerHooks;
@@ -80,6 +81,8 @@ private:
         Place place;
         qint64 order = 0;
         bool browser = false;
+        // Apps only: the windows it has, for finding it on the taskbar.
+        QSet<quintptr> windows;
         // Browser pages only: which windows have it, and under which tab
         // titles it was seen, so a closed tab can be told from a live one.
         QHash<quintptr, QSet<QString>> titles;
@@ -96,6 +99,8 @@ private:
 
     void onAddressRead(quintptr hwnd, const QString &page);
     void onTabsRead(quintptr hwnd, const QStringList &titles, const QString &page);
+    void onTaskbarRead(const QList<quintptr> &windows);
+    int taskbarPosition(const OpenPlace &open) const;
     void addOpen(const Place &place, const QString &pageTitle);
     void refreshOpen();
     qint64 rankFor(const QString &exe, qint64 created);
@@ -119,6 +124,7 @@ private:
 
     QHash<QString, OpenPlace> m_open;
     QHash<QString, qint64> m_rank; // by exe
+    QHash<quintptr, int> m_taskbar; // window to its button's position
     qint64 m_nextRank = 0;
     bool m_ranked = false;
 };

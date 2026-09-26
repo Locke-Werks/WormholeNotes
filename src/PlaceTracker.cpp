@@ -6,6 +6,7 @@
 #include <QRegularExpression>
 
 #include <algorithm>
+#include <climits>
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
@@ -162,6 +163,8 @@ PlaceTracker::PlaceTracker(QObject *parent)
     connect(this, &PlaceTracker::requestTabs, m_reader, &BrowserReader::readTabs);
     connect(m_reader, &BrowserReader::addressRead, this, &PlaceTracker::onAddressRead);
     connect(m_reader, &BrowserReader::tabsRead, this, &PlaceTracker::onTabsRead);
+    connect(this, &PlaceTracker::requestTaskbar, m_reader, &BrowserReader::readTaskbar);
+    connect(m_reader, &BrowserReader::taskbarRead, this, &PlaceTracker::onTaskbarRead);
     m_readerThread.start();
 }
 
@@ -409,7 +412,11 @@ void PlaceTracker::refreshOpen()
             continue;
         }
         const Place place = appPlace(w);
-        liveApps.insert(place.key);
+        if (!liveApps.contains(place.key)) {
+            liveApps.insert(place.key);
+            if (auto it = m_open.find(place.key); it != m_open.end())
+                it->windows.clear();
+        }
         if (!m_open.contains(place.key)) {
             OpenPlace open;
             open.place = place;
@@ -417,6 +424,7 @@ void PlaceTracker::refreshOpen()
             m_open.insert(place.key, open);
             changed = true;
         }
+        m_open[place.key].windows.insert(w.hwnd);
     }
 
     for (auto it = m_pageOf.begin(); it != m_pageOf.end();) {
@@ -451,10 +459,14 @@ void PlaceTracker::refreshOpen()
     if (changed && closed.isEmpty())
         emit openPlacesChanged();
 
-    // The tab strip is a longer walk than the address bar, so it is read
-    // less often.
-    if (++m_pollCount % 4 == 0 && !browserWindows.isEmpty())
+    // The tab strip and the taskbar are longer walks than the address bar,
+    // so they are read less often, and the taskbar at once when something
+    // opened.
+    const bool slowTurn = ++m_pollCount % 4 == 0;
+    if (slowTurn && !browserWindows.isEmpty())
         emit requestTabs(browserWindows);
+    if (slowTurn || changed || m_pollCount == 1)
+        emit requestTaskbar();
 }
 
 void PlaceTracker::onTabsRead(quintptr hwnd, const QStringList &tabs, const QString &page)
@@ -494,6 +506,31 @@ void PlaceTracker::onTabsRead(quintptr hwnd, const QStringList &tabs, const QStr
         close(key);
 }
 
+void PlaceTracker::onTaskbarRead(const QList<quintptr> &windows)
+{
+    QHash<quintptr, int> taskbar;
+    for (int i = 0; i < windows.size(); ++i)
+        taskbar.insert(windows.at(i), i);
+    if (taskbar == m_taskbar)
+        return;
+    m_taskbar = taskbar;
+    emit openPlacesChanged();
+}
+
+int PlaceTracker::taskbarPosition(const OpenPlace &open) const
+{
+    int best = INT_MAX;
+    const auto consider = [&](quintptr hwnd) {
+        if (auto it = m_taskbar.constFind(hwnd); it != m_taskbar.constEnd())
+            best = qMin(best, *it);
+    };
+    for (const quintptr hwnd : open.windows)
+        consider(hwnd);
+    for (auto it = open.titles.cbegin(); it != open.titles.cend(); ++it)
+        consider(it.key());
+    return best;
+}
+
 void PlaceTracker::close(const QString &key)
 {
     if (!m_open.remove(key))
@@ -504,15 +541,24 @@ void PlaceTracker::close(const QString &key)
 
 QList<Place> PlaceTracker::openPlaces() const
 {
-    QList<const OpenPlace *> sorted;
+    struct Entry
+    {
+        const OpenPlace *open;
+        int taskbar;
+    };
+    QList<Entry> sorted;
     for (const OpenPlace &open : m_open)
-        sorted.append(&open);
-    std::sort(sorted.begin(), sorted.end(), [](const OpenPlace *a, const OpenPlace *b) {
-        return a->order != b->order ? a->order < b->order : a->place.key < b->place.key;
+        sorted.append({ &open, open.place.key == kDesktopKey ? -1 : taskbarPosition(open) });
+    std::sort(sorted.begin(), sorted.end(), [](const Entry &a, const Entry &b) {
+        if (a.taskbar != b.taskbar)
+            return a.taskbar < b.taskbar;
+        if (a.open->order != b.open->order)
+            return a.open->order < b.open->order;
+        return a.open->place.key < b.open->place.key;
     });
     QList<Place> out;
-    for (const OpenPlace *open : std::as_const(sorted))
-        out.append(open->place);
+    for (const Entry &entry : std::as_const(sorted))
+        out.append(entry.open->place);
     return out;
 }
 

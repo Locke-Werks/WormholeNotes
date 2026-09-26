@@ -45,7 +45,15 @@ int main(int argc, char *argv[])
             out << "    " << tab << Qt::endl;
     });
 
+    QObject::connect(&reader, &BrowserReader::taskbarRead, [&](const QList<quintptr> &windows) {
+        out << "taskbar:";
+        for (const quintptr hwnd : windows)
+            out << " " << hwnd;
+        out << Qt::endl;
+    });
+
     QTimer::singleShot(2500, [&] {
+        reader.readTaskbar();
         out << "current: " << tracker.current().key << "  (" << tracker.current().label << ")" << Qt::endl;
         out << "open:" << Qt::endl;
         for (const Place &place : tracker.openPlaces())

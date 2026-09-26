@@ -13,6 +13,9 @@ struct IUIAutomationElement;
 // on its own thread, because a UI Automation call waits on the browser and a
 // busy browser can take a long time to answer.
 //
+// It also reads the order of the taskbar's buttons, which is what the ring of
+// places follows.
+//
 // Only the browser's own chrome is searched. Web content can hold tens of
 // thousands of elements, so any subtree that is a document is skipped.
 class BrowserReader : public QObject
@@ -31,12 +34,15 @@ public:
 public Q_SLOTS:
     void readAddress(quintptr hwnd);
     void readTabs(QList<quintptr> hwnds);
+    void readTaskbar();
 
 Q_SIGNALS:
     // Empty page: could not be read, or the user is typing in the bar.
     void addressRead(quintptr hwnd, const QString &page);
     // The window's tabs, and the page its active tab is on.
     void tabsRead(quintptr hwnd, const QStringList &titles, const QString &page);
+    // The windows on the taskbar, in button order left to right.
+    void taskbarRead(const QList<quintptr> &windows);
 
 private:
     bool ensure();
