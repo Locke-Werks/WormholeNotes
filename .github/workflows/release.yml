@@ -132,9 +132,13 @@ jobs:
           "installer: $($sig.Status)  $($sig.SignerCertificate.Subject)"
           if ($sig.Status -ne 'Valid') { throw "installer is $($sig.Status)" }
 
-          # Proves signing did not orphan the appended container.
-          ./tools/lwforge.exe inspect $setup | Select-Object -First 12
-          if ($LASTEXITCODE -ne 0) { throw "the signed installer cannot read its own container" }
+          # Proves signing did not orphan the appended container. Captured whole
+          # before trimming: cutting the pipe early breaks it under lwforge,
+          # which then exits non-zero on a healthy installer.
+          $inspect = ./tools/lwforge.exe inspect $setup 2>&1
+          $code = $LASTEXITCODE
+          $inspect | Select-Object -First 12
+          if ($code -ne 0) { throw "the signed installer cannot read its own container" }
 
           $report = & $setup --check-only /O:desktop=off /O:open_with=off 2>&1 | Out-String
           $report
