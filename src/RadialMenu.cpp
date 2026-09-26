@@ -318,6 +318,8 @@ void RadialMenu::paintEvent(QPaintEvent *)
 
         for (int i = 0; i < level.items.size(); ++i) {
             const Item &item = level.items.at(i);
+            if (!item.action)
+                continue;
             const bool enabled = selectable(item);
             const bool current = level.current == i && enabled;
             const qreal inset = (kDivider / 2) / mid;

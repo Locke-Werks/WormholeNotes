@@ -132,6 +132,18 @@ bool TextFile::write(const QString &path, QString *error) const
     return true;
 }
 
+bool TextFile::canEncode(const QString &text, Encoding encoding)
+{
+    if (encoding != Encoding::Ansi)
+        return true;
+    // The code page substitutes '?' for what it cannot hold without reporting
+    // an error, so the only reliable test is whether the text survives a round trip.
+    QStringEncoder encoder(QStringConverter::System);
+    const QByteArray bytes = encoder(text);
+    QStringDecoder decoder(QStringConverter::System);
+    return !encoder.hasError() && QString(decoder(bytes)) == text;
+}
+
 QString encodingName(Encoding encoding)
 {
     switch (encoding) {

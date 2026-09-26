@@ -251,6 +251,8 @@ void RadialPrompt::present()
 
 int RadialPrompt::exec()
 {
+    if (m_loop)
+        return m_cancelId;
     present();
     QEventLoop loop;
     m_loop = &loop;
@@ -390,15 +392,22 @@ bool RadialPrompt::event(QEvent *event)
         auto *key = static_cast<QKeyEvent *>(event);
         const bool ctrl = key->modifiers() & Qt::ControlModifier;
         const bool alt = key->modifiers() & Qt::AltModifier;
-        bool claim = false;
+        // While a modal answer is awaited, no window shortcut may run: Ctrl+V
+        // would edit the document behind "Save changes?", and anything that
+        // opens another prompt would re-enter this one.
+        bool claim = m_loop != nullptr;
         switch (key->key()) {
         case Qt::Key_Escape: case Qt::Key_Tab: case Qt::Key_Backtab: case Qt::Key_Return:
         case Qt::Key_Enter: case Qt::Key_Space: case Qt::Key_Left: case Qt::Key_Right:
         case Qt::Key_Home: case Qt::Key_End: case Qt::Key_Backspace: case Qt::Key_Delete:
-            claim = !alt;
+            claim = claim || !alt;
             break;
-        case Qt::Key_A: case Qt::Key_C: case Qt::Key_X: case Qt::Key_V:
-            claim = ctrl && focusedField();
+        case Qt::Key_A: case Qt::Key_C: case Qt::Key_X: case Qt::Key_V: case Qt::Key_Z: case Qt::Key_Y:
+            claim = claim || (ctrl && focusedField());
+            break;
+        case Qt::Key_F5:
+            // Time/Date would go into the document, not the field being typed in.
+            claim = claim || focusedField();
             break;
         default:
             break;

@@ -101,8 +101,7 @@ TondoWindow::TondoWindow(QWidget *parent)
     connect(m_edit, &RoundEdit::cursorPositionChanged, this, qOverload<>(&QWidget::update));
     connect(m_edit, &RoundEdit::zoomRequested, this, &TondoWindow::zoomBy);
     connect(m_edit, &RoundEdit::filesDropped, this, [this](const QStringList &paths) {
-        if (maybeSave())
-            openPath(paths.first());
+        openDropped(paths.first());
     });
     connect(m_edit, &RoundEdit::contextMenuRequested, this, [this](qreal angle) {
         m_radial->open(m_contextMenu, angle);
@@ -468,6 +467,8 @@ void TondoWindow::mousePressEvent(QMouseEvent *event)
             break;
         }
     } else if (event->button() == Qt::RightButton && zone != Zone::Face && zone != Zone::Outside) {
+        if (modalOpen())
+            return;
         m_radial->open(m_rootMenu, Arc::angleOf(center(), event->position()));
         update();
         return;
@@ -560,7 +561,7 @@ void TondoWindow::keyPressEvent(QKeyEvent *event)
 void TondoWindow::openMenu(int header, bool fromKeyboard)
 {
     const QList<Header> list = headers();
-    if (header < 0 || header >= list.size())
+    if (header < 0 || header >= list.size() || modalOpen())
         return;
     const Header &h = list.at(header);
     if (!fromKeyboard && m_radial->isOpen() && m_radial->rootMenu() == h.menu) {
@@ -601,12 +602,53 @@ void TondoWindow::toggleMaximize()
 void TondoWindow::closeEvent(QCloseEvent *event)
 {
     m_radial->close();
-    if (!maybeSave()) {
+
+    // Never ask inside closeEvent. While a close is being handled Qt accepts
+    // any further close request outright, so a second Alt+F4 or a taskbar
+    // Close during "Save changes?" would quit and lose the work. Refuse this
+    // close, ask from the event loop, then close again once answered.
+    if (modalOpen()) {
         event->ignore();
         return;
     }
+    if (!m_closeConfirmed && hasUnsavedChanges()) {
+        event->ignore();
+        if (!m_closePending) {
+            m_closePending = true;
+            QTimer::singleShot(0, this, [this] {
+                const bool proceed = maybeSave();
+                m_closePending = false;
+                if (proceed) {
+                    m_closeConfirmed = true;
+                    close();
+                }
+            });
+        }
+        return;
+    }
+    m_prompt->dismiss();
     saveSettings();
     event->accept();
+}
+
+bool TondoWindow::hasUnsavedChanges() const
+{
+    return m_edit->document()->isModified();
+}
+
+bool TondoWindow::modalOpen() const
+{
+    return m_prompt->isOpen() && m_prompt->isModal();
+}
+
+void TondoWindow::openDropped(const QString &path)
+{
+    // Out of the drop handler first: a prompt shown inside IDropTarget::Drop
+    // keeps Explorer's drag stuck until it is answered.
+    QTimer::singleShot(0, this, [this, path] {
+        if (maybeSave())
+            openPath(path);
+    });
 }
 
 void TondoWindow::changeEvent(QEvent *event)
@@ -627,8 +669,7 @@ void TondoWindow::dropEvent(QDropEvent *event)
     for (const QUrl &url : event->mimeData()->urls()) {
         if (url.isLocalFile()) {
             event->acceptProposedAction();
-            if (maybeSave())
-                openPath(url.toLocalFile());
+            openDropped(url.toLocalFile());
             return;
         }
     }
@@ -683,8 +724,10 @@ void TondoWindow::createActions()
     QMenu *format = new QMenu(tr("F&ormat"), this);
     m_familyMenu = format->addMenu(tr("&Font"));
     m_sizeMenu = format->addMenu(tr("&Size"));
-    connect(m_familyMenu, &QMenu::aboutToShow, this, &TondoWindow::rebuildFontMenus);
-    connect(m_sizeMenu, &QMenu::aboutToShow, this, &TondoWindow::rebuildFontMenus);
+    m_familyGroup = new QActionGroup(this);
+    m_sizeGroup = new QActionGroup(this);
+    connect(m_familyMenu, &QMenu::aboutToShow, this, &TondoWindow::rebuildFamilyMenu);
+    connect(m_sizeMenu, &QMenu::aboutToShow, this, &TondoWindow::rebuildSizeMenu);
     m_boldAction = add(format, tr("&Bold"), {}, [this](bool on) {
         m_baseFont.setBold(on);
         applyFont();
@@ -766,7 +809,10 @@ void TondoWindow::createActions()
     connect(menuKey, &QShortcut::activated, this, [this] { openMenu(0, true); });
 }
 
-void TondoWindow::rebuildFontMenus()
+// Both menus are refilled each time they open, so they always show the font
+// in use. clear() deletes the old actions, and a deleted action leaves its
+// group on its own, so the groups live as long as the window.
+void TondoWindow::rebuildFamilyMenu()
 {
     // Monospaced faces first, since this is Notepad, then a few others worth
     // reading at length. Only the ones actually installed appear.
@@ -785,26 +831,27 @@ void TondoWindow::rebuildFontMenus()
         families.prepend(m_baseFont.family());
 
     m_familyMenu->clear();
-    auto *familyGroup = new QActionGroup(m_familyMenu);
     for (const QString &family : families) {
         QAction *action = m_familyMenu->addAction(family);
         action->setCheckable(true);
         action->setChecked(family == m_baseFont.family());
-        familyGroup->addAction(action);
+        m_familyGroup->addAction(action);
         connect(action, &QAction::triggered, this, [this, family] {
             m_baseFont.setFamily(family);
             applyFont();
         });
     }
+}
 
+void TondoWindow::rebuildSizeMenu()
+{
     m_sizeMenu->clear();
-    auto *sizeGroup = new QActionGroup(m_sizeMenu);
     const int current = qRound(m_baseFont.pointSizeF());
     for (const int size : { 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36 }) {
         QAction *action = m_sizeMenu->addAction(QString::number(size));
         action->setCheckable(true);
         action->setChecked(size == current);
-        sizeGroup->addAction(action);
+        m_sizeGroup->addAction(action);
         connect(action, &QAction::triggered, this, [this, size] {
             m_baseFont.setPointSizeF(size);
             applyFont();
@@ -936,6 +983,10 @@ void TondoWindow::setAlwaysOnTop(bool on)
 int TondoWindow::ask(const QStringList &lines, const QList<QPair<QString, int>> &buttons, int defaultId,
                      int cancelId)
 {
+    // One question at a time. Resetting a prompt that is still waiting would
+    // strand the event loop it is waiting in.
+    if (modalOpen())
+        return cancelId;
     m_radial->close();
     m_prompt->reset(true);
     for (const QString &line : lines)
@@ -1040,6 +1091,20 @@ bool TondoWindow::writeTo(const QString &path)
     file.encoding = m_encoding;
     file.lineEnding = m_lineEnding;
 
+    if (!TextFile::canEncode(file.text, file.encoding)) {
+        const int answer = ask({ tr("Some characters cannot be saved as ANSI"),
+                                 tr("and would be written as question marks.") },
+                               { { tr("Save as UTF-8"), SaveId }, { tr("Save Anyway"), DiscardId },
+                                 { tr("Cancel"), CancelId } },
+                               SaveId, CancelId);
+        if (answer == CancelId)
+            return false;
+        if (answer == SaveId) {
+            m_encoding = file.encoding = Encoding::Utf8;
+            updateActions();
+        }
+    }
+
     QString error;
     if (!file.write(path, &error)) {
         tell({ tr("Cannot save %1").arg(QFileInfo(path).fileName()), error });
@@ -1137,6 +1202,8 @@ void TondoWindow::printTo(QPrinter *printer)
 
 void TondoWindow::showFind(bool replaceMode)
 {
+    if (modalOpen())
+        return;
     m_radial->close();
     QString seed = m_edit->textCursor().selectedText();
     // A selection spanning lines is not something anyone meant to search for.
@@ -1279,6 +1346,8 @@ void TondoWindow::replaceAll()
 
 void TondoWindow::goToLine()
 {
+    if (modalOpen())
+        return;
     QTextDocument *doc = m_edit->document();
     m_radial->close();
     m_prompt->reset(true);

@@ -38,6 +38,7 @@ public:
     ~TondoWindow() override;
 
     bool openPath(const QString &path);
+    bool hasUnsavedChanges() const;
 
     // For tests and screenshots.
     RoundEdit *editor() const { return m_edit; }
@@ -102,7 +103,10 @@ private:
 
     // Notepad.
     void createActions();
-    void rebuildFontMenus();
+    void rebuildFamilyMenu();
+    void rebuildSizeMenu();
+    bool modalOpen() const;
+    void openDropped(const QString &path);
     void applyTheme();
     void applyFont();
     void zoomBy(int steps);
@@ -183,6 +187,10 @@ private:
     QMenu *m_contextMenu = nullptr;
     QMenu *m_familyMenu = nullptr;
     QMenu *m_sizeMenu = nullptr;
+    QActionGroup *m_familyGroup = nullptr;
+    QActionGroup *m_sizeGroup = nullptr;
+    bool m_closeConfirmed = false;
+    bool m_closePending = false;
 
     QAction *m_undo = nullptr;
     QAction *m_redo = nullptr;

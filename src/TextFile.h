@@ -15,6 +15,10 @@ struct TextFile
 
     static bool read(const QString &path, TextFile &out, QString *error);
     bool write(const QString &path, QString *error) const;
+
+    // False when saving in this encoding would lose characters. Only the ANSI
+    // code page can; the others encode all of Unicode.
+    static bool canEncode(const QString &text, Encoding encoding);
 };
 
 QString encodingName(Encoding encoding);

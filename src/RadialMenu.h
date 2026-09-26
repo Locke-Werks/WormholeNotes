@@ -2,6 +2,7 @@
 
 #include <QColor>
 #include <QList>
+#include <QPointer>
 #include <QWidget>
 
 class QAction;
@@ -49,7 +50,9 @@ protected:
 private:
     struct Item
     {
-        QAction *action = nullptr;
+        // A menu can rebuild its actions while a ring still shows them; the
+        // font list does every time it opens.
+        QPointer<QAction> action;
         QString label;
         QString shortcut;
         QChar mnemonic;
