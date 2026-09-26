@@ -1,0 +1,17 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "vs",
+      "displayName": "Visual Studio, whatever is installed",
+      "description": "No generator named, so CMake picks the newest Visual Studio and needs no vcvars. Point CMAKE_PREFIX_PATH at a Qt 6 MSVC kit, e.g. C:/Qt/6.8.3/msvc2022_64.",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "installDir": "${sourceDir}/build/${presetName}/install"
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "vs", "configuration": "Debug" },
+    { "name": "release", "configurePreset": "vs", "configuration": "Release" }
+  ]
+}

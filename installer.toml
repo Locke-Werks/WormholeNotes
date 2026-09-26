@@ -1,0 +1,107 @@
+# Forge installer configuration. Schema: Locke-Werks/Forge docs/config-schema.md
+#
+# Paths use literal strings so a backslash stays a backslash. A TOML basic string
+# would read "\b" in "{InstallDir}\bin" as a backspace.
+
+[product]
+name         = "Tondo"
+version      = "0.1.0"
+publisher    = "Locke Werks"
+description  = "A notepad in the round"
+copyright    = "Copyright (C) 2026 Locke Werks"
+url          = "https://github.com/Locke-Werks/tondo"
+icon         = "assets/tondo.ico"
+# Stable across versions. Keys the single-instance mutex and the upgrade path, so
+# it must never change.
+upgrade_code = "029a709c-18a7-4e65-8064-99d8acf500c1"
+aumid        = "LockeWerks.Tondo"
+
+[install]
+scope     = "machine"
+dir       = '{ProgramFiles}\Locke Werks\Tondo'
+elevation = "required"
+
+[ui]
+license_text = """
+Tondo
+Copyright (C) 2026 Locke Werks
+
+This program is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with this
+program. If not, see <https://www.gnu.org/licenses/>.
+
+Tondo is built with Qt, used under the GNU LGPL version 3. The Qt libraries are
+installed as separate DLLs beside tondo.exe and can be replaced.
+
+The complete source is at https://github.com/Locke-Werks/tondo
+"""
+
+# Windows 10 1809. The floor Qt 6.8 supports.
+[[preflight]]
+type = "os_build"
+min  = 17763
+fail = "Tondo needs Windows 10 version 1809 or newer."
+
+# An upgrade cannot overwrite a running copy, and the uninstaller cannot delete one.
+[[preflight]]
+type            = "process_not_running"
+name            = "tondo.exe"
+restart_manager = true
+fail            = "Tondo is running. Close every Tondo window, then try again."
+
+[[preflight]]
+type  = "free_disk_space"
+bytes = 104857600
+fail  = "Tondo needs about 100 MB free on the install volume."
+
+[[options]]
+id      = "start_menu"
+label   = "Add a Start Menu shortcut"
+detail  = "Puts Tondo in the Start Menu for everyone on this machine."
+default = true
+
+[[options]]
+id      = "desktop"
+label   = "Add a desktop shortcut"
+detail  = "Puts Tondo on the shared desktop."
+default = false
+
+[[options]]
+id      = "open_with"
+label   = "Offer Tondo in Open with for text files"
+detail  = "Adds Tondo to the Open with list for .txt files. Your default editor does not change."
+default = true
+
+[[actions]]
+type   = "shortcut"
+target = '{InstallDir}\tondo.exe'
+name   = "Tondo"
+when   = "start_menu"
+
+[[actions]]
+type   = "shortcut"
+target = '{InstallDir}\tondo.exe'
+where  = "desktop"
+name   = "Tondo"
+when   = "desktop"
+
+[[actions]]
+type = "arp"
+
+[[assoc]]
+progid          = "LockeWerks.Tondo.txt"
+extension       = ".txt"
+friendly        = "Text Document"
+icon            = '{InstallDir}\tondo.exe,0'
+open_command    = '"{InstallDir}\tondo.exe" "%1"'
+app_name        = "Tondo"
+app_description = "A notepad in the round"
+when            = "open_with"

@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+
+      # The preset names no generator, so CMake takes the newest Visual Studio
+      # on the runner and needs no vcvars.
+      - name: Configure
+        run: cmake --preset vs -DCMAKE_PREFIX_PATH="${{ env.QT_ROOT_DIR }}"
+
+      - name: Build
+        run: cmake --build --preset release
+
+      - name: Stage
+        shell: pwsh
+        run: |
+          cmake --install build/vs --config Release --prefix stage
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw stage/tondo.exe
+          $exe = Get-Item stage/tondo.exe
+          "tondo.exe {0:N0} KB, version {1}" -f ($exe.Length / 1KB), $exe.VersionInfo.ProductVersion
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tondo-windows-x64
+          path: stage/
