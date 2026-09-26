@@ -1,32 +1,33 @@
-#include "TondoWindow.h"
+#include "Wormhole.h"
 
 #include <QApplication>
 #include <QIcon>
-#include <QSessionManager>
+
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 int main(int argc, char *argv[])
 {
+    // One hole per desktop. A second copy would put a second hole on every
+    // window and write the same sheets file from two processes.
+    HANDLE instance = CreateMutexW(nullptr, TRUE, L"LockeWerks.WormholeNotes.Instance");
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
+        return 0;
+
     QApplication app(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("Tondo"));
+    QApplication::setApplicationName(QStringLiteral("WormholeNotes"));
     QApplication::setOrganizationName(QStringLiteral("Locke Werks"));
-    QApplication::setApplicationVersion(QStringLiteral(TONDO_VERSION));
-    QApplication::setWindowIcon(QIcon(QStringLiteral(":/tondo.ico")));
+    QApplication::setApplicationVersion(QStringLiteral(WORMHOLENOTES_VERSION));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/wormholenotes.ico")));
+    // The note hides rather than closes, and the hole is never the last
+    // window in any sense that matters. Quitting is explicit.
+    QApplication::setQuitOnLastWindowClosed(false);
 
-    TondoWindow window;
+    Wormhole wormhole;
+    wormhole.start();
+    const int code = app.exec();
 
-    // Shown before the file opens, so that if it cannot be read the answer
-    // appears on a window that exists.
-    window.show();
-    const QStringList args = QApplication::arguments();
-    if (args.size() > 1)
-        window.openPath(args.at(1));
-
-    // Windows ends the session by ending the process. With unsaved work, ask it
-    // not to, the way Notepad does; the user then sees Tondo holding up sign-out.
-    QObject::connect(&app, &QGuiApplication::commitDataRequest, &window, [&window](QSessionManager &manager) {
-        if (window.hasUnsavedChanges())
-            manager.cancel();
-    });
-
-    return app.exec();
+    CloseHandle(instance);
+    return code;
 }

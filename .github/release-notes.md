@@ -1,9 +1,8 @@
-A notepad in which nothing is a rectangle.
+A round sticky note that rides on whatever window you are using.
 
-**Tondo-Setup.exe** installs to Program Files, with a Start Menu shortcut and an
-Open with entry for .txt files, both optional. It never takes over your default
-editor. Silent install: `/S`. Options off: `/O:start_menu=off`, `/O:desktop=off`,
-`/O:open_with=off`.
+**WormholeNotes-Setup.exe** installs to Program Files, with an optional Start
+Menu shortcut. Silent install: `/S`. Options off: `/O:start_menu=off`,
+`/O:desktop=off`.
 
 **The portable zip** runs from wherever you unzip it. Nothing to install.
 

@@ -32,11 +32,11 @@ jobs:
         shell: pwsh
         run: |
           cmake --install build/vs --config Release --prefix stage
-          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw stage/tondo.exe
-          $exe = Get-Item stage/tondo.exe
-          "tondo.exe {0:N0} KB, version {1}" -f ($exe.Length / 1KB), $exe.VersionInfo.ProductVersion
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw stage/WormholeNotes.exe
+          $exe = Get-Item stage/WormholeNotes.exe
+          "WormholeNotes.exe {0:N0} KB, version {1}" -f ($exe.Length / 1KB), $exe.VersionInfo.ProductVersion
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tondo-windows-x64
+          name: wormholenotes-windows-x64
           path: stage/

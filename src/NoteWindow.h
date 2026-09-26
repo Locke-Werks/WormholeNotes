@@ -1,7 +1,5 @@
 #pragma once
 
-#include "TextFile.h"
-
 #include <QFont>
 #include <QTimer>
 #include <QWidget>
@@ -9,7 +7,6 @@
 class QAction;
 class QActionGroup;
 class QMenu;
-class QPrinter;
 class RadialMenu;
 class RadialPrompt;
 class RoundEdit;
@@ -23,22 +20,30 @@ struct SearchOptions
     bool backward = false;
 };
 
-// The application window: a frameless, translucent top level that paints
-// itself as a disc. The bezel is the chrome. Its upper-left arc is the menu
-// bar, its top arc the title, its upper right the window buttons and its
-// bottom arc the status bar; dragging it moves the window and dragging its
-// outer edge resizes the circle. The face is a RoundEdit, with a RadialMenu
-// and a RadialPrompt drawn over it when a menu or a question is open.
-class TondoWindow : public QWidget
+// The note: Tondo's round window, holding one place's sheet. A frameless,
+// translucent top level that paints itself as a disc. The bezel is the
+// chrome: its upper-left arc is the menu bar, its top arc the place, its
+// upper right the window buttons and its bottom arc the status bar. Dragging
+// it moves the note and dragging its outer edge resizes the circle.
+//
+// It opens out of the hole and folds back into it. Closing it, pressing
+// Escape or switching to another app puts it away; nothing is ever unsaved,
+// because every edit goes straight to the sheet.
+class NoteWindow : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit TondoWindow(QWidget *parent = nullptr);
-    ~TondoWindow() override;
+    explicit NoteWindow(QWidget *parent = nullptr);
+    ~NoteWindow() override;
 
-    bool openPath(const QString &path);
-    bool hasUnsavedChanges() const;
+    // Loads a sheet. Its edits come back through textEdited.
+    void setSheet(const QString &label, const QString &text);
+    QString text() const;
+    // Opens the circle centred on a point in logical screen coordinates,
+    // pulled in as far as needed to stay on that screen.
+    void openAt(const QPoint &globalCenter);
+    void putAway();
 
     // For tests and screenshots.
     RoundEdit *editor() const { return m_edit; }
@@ -46,6 +51,11 @@ public:
     RadialPrompt *prompt() const { return m_prompt; }
     void openMenu(int header, bool fromKeyboard);
     void showFind(bool replaceMode);
+
+Q_SIGNALS:
+    void textEdited(const QString &text);
+    void putAwayRequested();
+    void quitRequested();
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -58,13 +68,11 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
     void changeEvent(QEvent *event) override;
-    void dragEnterEvent(QDragEnterEvent *event) override;
-    void dropEvent(QDropEvent *event) override;
 
 private:
-    enum Button { MinimizeButton, MaximizeButton, CloseButton, ButtonCount };
+    enum Button { MaximizeButton, CloseButton, ButtonCount };
     enum class Zone { Outside, Face, Ring, Edge, Button, Header };
-    enum PromptId { FindNextId = 1, ReplaceId, ReplaceAllId, CloseId, OkId, CancelId, SaveId, DiscardId };
+    enum PromptId { FindNextId = 1, ReplaceId, ReplaceAllId, CloseId, OkId, CancelId };
 
     struct Theme
     {
@@ -101,34 +109,22 @@ private:
     void triggerButton(Button button);
     void toggleMaximize();
 
-    // Notepad.
+    // The editor.
     void createActions();
     void rebuildFamilyMenu();
     void rebuildSizeMenu();
     bool modalOpen() const;
-    void openDropped(const QString &path);
     void applyTheme();
     void applyFont();
     void zoomBy(int steps);
     void setZoom(int percent);
-    void updateTitle();
     void updateActions();
     QString statusText() const;
     void flash(const QString &message);
+    void checkStillActive();
 
     int ask(const QStringList &lines, const QList<QPair<QString, int>> &buttons, int defaultId, int cancelId);
     void tell(const QStringList &lines);
-
-    bool maybeSave();
-    void newFile();
-    void newWindow();
-    void openFile();
-    bool save();
-    bool saveAs();
-    bool writeTo(const QString &path);
-    void pageSetup();
-    void print();
-    void printTo(QPrinter *printer);
 
     SearchOptions promptOptions() const;
     void onPromptButton(int id);
@@ -139,9 +135,6 @@ private:
     void goToLine();
     void insertTimeDate();
     void chooseFont();
-    void setEncoding(Encoding encoding);
-    void setLineEnding(LineEnding lineEnding);
-    void setAlwaysOnTop(bool on);
     void about();
 
     void loadSettings();
@@ -150,12 +143,11 @@ private:
     RoundEdit *m_edit = nullptr;
     RadialMenu *m_radial = nullptr;
     RadialPrompt *m_prompt = nullptr;
-    QPrinter *m_printer = nullptr;
 
-    int m_radius = 300;
+    int m_radius = 220;
     bool m_maximized = false;
     QPoint m_restoreCenter;
-    int m_restoreRadius = 300;
+    int m_restoreRadius = 220;
 
     int m_hoverButton = -1;
     int m_hoverHeader = -1;
@@ -164,9 +156,8 @@ private:
     QPointF m_resizeCenter;
     qreal m_resizeOffset = 0;
 
-    QString m_path;
-    Encoding m_encoding = Encoding::Utf8;
-    LineEnding m_lineEnding = LineEnding::CRLF;
+    bool m_loading = false;
+    bool m_choosingFont = false;
     QFont m_baseFont;
     int m_zoom = 100;
     bool m_statusVisible = true;
@@ -189,8 +180,6 @@ private:
     QMenu *m_sizeMenu = nullptr;
     QActionGroup *m_familyGroup = nullptr;
     QActionGroup *m_sizeGroup = nullptr;
-    bool m_closeConfirmed = false;
-    bool m_closePending = false;
 
     QAction *m_undo = nullptr;
     QAction *m_redo = nullptr;
@@ -200,9 +189,6 @@ private:
     QAction *m_findNextAction = nullptr;
     QAction *m_findPrevAction = nullptr;
     QAction *m_statusAction = nullptr;
-    QAction *m_onTopAction = nullptr;
     QAction *m_boldAction = nullptr;
     QAction *m_italicAction = nullptr;
-    QActionGroup *m_encodingGroup = nullptr;
-    QActionGroup *m_lineEndingGroup = nullptr;
 };

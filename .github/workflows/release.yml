@@ -24,7 +24,7 @@ jobs:
         shell: pwsh
         run: |
           $tag   = "${{ github.ref_name }}".TrimStart('v')
-          $cmake = (Select-String -Path CMakeLists.txt -Pattern 'project\(tondo VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          $cmake = (Select-String -Path CMakeLists.txt -Pattern 'project\(WormholeNotes VERSION ([0-9.]+)').Matches[0].Groups[1].Value
           $toml  = (Select-String -Path installer.toml -Pattern '^\s*version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
           "tag=$tag  CMakeLists=$cmake  installer.toml=$toml"
           if ($tag -ne $cmake -or $tag -ne $toml) { throw "version mismatch" }
@@ -47,9 +47,9 @@ jobs:
         shell: pwsh
         run: |
           cmake --install build/vs --config Release --prefix stage
-          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw --no-system-dxc-compiler stage/tondo.exe
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw --no-system-dxc-compiler stage/WormholeNotes.exe
 
-          # Qt and Tondo link the dynamic MSVC runtime. Ship it beside the exe
+          # Qt and WormholeNotes link the dynamic MSVC runtime. Ship it beside the exe
           # rather than depending on the redistributable being installed.
           $vs  = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
           $crt = Get-ChildItem "$vs\VC\Redist\MSVC" -Directory | Where-Object Name -match '^\d' |
@@ -61,7 +61,7 @@ jobs:
             Copy-Item (Join-Path $crt.FullName $dll) stage/
           }
 
-      # Only tondo.exe. The Qt and CRT DLLs already carry their vendors'
+      # Only WormholeNotes.exe. The Qt and CRT DLLs already carry their vendors'
       # signatures, and re-signing them would replace those.
       - name: Sign the payload
         uses: azure/trusted-signing-action@v0
@@ -106,7 +106,7 @@ jobs:
         shell: pwsh
         run: |
           ./tools/lwforge.exe build --config installer.toml --payload stage --stub tools/lwstub.exe `
-            --out "dist/Tondo-$env:VERSION-Setup.exe"
+            --out "dist/WormholeNotes-$env:VERSION-Setup.exe"
           if ($LASTEXITCODE -ne 0) { throw "lwforge exited $LASTEXITCODE" }
 
       - name: Sign the installer
@@ -127,7 +127,7 @@ jobs:
       - name: Verify the installer
         shell: pwsh
         run: |
-          $setup = "dist/Tondo-$env:VERSION-Setup.exe"
+          $setup = "dist/WormholeNotes-$env:VERSION-Setup.exe"
           $sig = Get-AuthenticodeSignature $setup
           "installer: $($sig.Status)  $($sig.SignerCertificate.Subject)"
           if ($sig.Status -ne 'Valid') { throw "installer is $($sig.Status)" }
@@ -140,13 +140,13 @@ jobs:
           $inspect | Select-Object -First 12
           if ($code -ne 0) { throw "the signed installer cannot read its own container" }
 
-          $report = & $setup --check-only /O:desktop=off /O:open_with=off 2>&1 | Out-String
+          $report = & $setup --check-only /O:desktop=off 2>&1 | Out-String
           $report
           if ($LASTEXITCODE -ne 0) { throw "check-only exited $LASTEXITCODE`n$report" }
 
       - name: Portable zip
         shell: pwsh
-        run: Compress-Archive -Path stage/* -DestinationPath "dist/Tondo-$env:VERSION-portable-x64.zip"
+        run: Compress-Archive -Path stage/* -DestinationPath "dist/WormholeNotes-$env:VERSION-portable-x64.zip"
 
       - name: Publish
         shell: pwsh
@@ -155,5 +155,5 @@ jobs:
         run: |
           gh release create "${{ github.ref_name }}" dist/* `
             --repo "${{ github.repository }}" `
-            --title "Tondo ${{ github.ref_name }}" `
+            --title "WormholeNotes ${{ github.ref_name }}" `
             --notes-file .github/release-notes.md

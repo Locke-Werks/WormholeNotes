@@ -1,34 +1,24 @@
-#include "TondoWindow.h"
+#include "NoteWindow.h"
 
 #include "Arc.h"
 #include "RadialMenu.h"
 #include "RadialPrompt.h"
-#include "RingTextLayout.h"
 #include "RoundEdit.h"
 
 #include <QAction>
+#include <QCloseEvent>
 #include <QActionGroup>
 #include <QApplication>
-#include <QCloseEvent>
 #include <QDateTime>
-#include <QDir>
-#include <QFileDialog>
-#include <QFileInfo>
 #include <QFontDatabase>
 #include <QFontDialog>
 #include <QGuiApplication>
 #include <QLocale>
 #include <QMenu>
-#include <QMimeData>
-#include <QPageSetupDialog>
 #include <QPainter>
-#include <QPrintDialog>
-#include <QPrinter>
-#include <QProcess>
 #include <QScreen>
 #include <QSettings>
 #include <QShortcut>
-#include <QStandardPaths>
 #include <QStyleHints>
 #include <QTextBlock>
 #include <QTextDocument>
@@ -40,8 +30,8 @@ namespace {
 
 constexpr int kShadow = 16;
 constexpr int kEdgeGrip = 7;
-constexpr int kMinRadius = 170;
-constexpr int kDefaultRadius = 300;
+constexpr int kMinRadius = 140;
+constexpr int kDefaultRadius = 220;
 constexpr int kMinZoom = 10;
 constexpr int kMaxZoom = 500;
 
@@ -49,15 +39,10 @@ constexpr int kMaxZoom = 500;
 // The menu bar starts just above nine o'clock and runs clockwise toward noon;
 // the title fills the arc between it and the window buttons.
 constexpr qreal kMenuBarStart = -172;
-constexpr qreal kButtonAngle[] = { -40, -27, -14 };
+constexpr qreal kButtonAngle[] = { -27, -14 };
 constexpr qreal kStatusSpan = 120;
 
 const QColor kAccent(0xd6, 0x26, 0x2a);
-
-QString displayName(const QString &path)
-{
-    return path.isEmpty() ? QObject::tr("Untitled") : QFileInfo(path).fileName();
-}
 
 QColor withAlpha(QColor color, int alpha)
 {
@@ -67,22 +52,19 @@ QColor withAlpha(QColor color, int alpha)
 
 } // namespace
 
-TondoWindow::TondoWindow(QWidget *parent)
+NoteWindow::NoteWindow(QWidget *parent)
     : QWidget(parent)
 {
-    // The minimize and system-menu hints are what let the taskbar button
-    // minimize and restore a window that has no frame of its own.
-    setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowMinimizeButtonHint
-                   | Qt::WindowSystemMenuHint);
+    // A tool window, so the note has no taskbar button of its own: it belongs
+    // to whatever window its hole is on.
+    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);
-    setAcceptDrops(true);
 
     m_edit = new RoundEdit(this);
     m_prompt = new RadialPrompt(this);
     m_radial = new RadialMenu(this);
     setFocusProxy(m_edit);
-    m_printer = new QPrinter(QPrinter::HighResolution);
 
     m_flashTimer.setSingleShot(true);
     connect(&m_flashTimer, &QTimer::timeout, this, [this] {
@@ -93,16 +75,16 @@ TondoWindow::TondoWindow(QWidget *parent)
     createActions();
 
     QTextDocument *doc = m_edit->document();
-    connect(doc, &QTextDocument::modificationChanged, this, &TondoWindow::updateTitle);
-    connect(doc, &QTextDocument::undoAvailable, this, &TondoWindow::updateActions);
-    connect(doc, &QTextDocument::redoAvailable, this, &TondoWindow::updateActions);
-    connect(doc, &QTextDocument::contentsChanged, this, &TondoWindow::updateActions);
-    connect(m_edit, &RoundEdit::selectionChanged, this, &TondoWindow::updateActions);
-    connect(m_edit, &RoundEdit::cursorPositionChanged, this, qOverload<>(&QWidget::update));
-    connect(m_edit, &RoundEdit::zoomRequested, this, &TondoWindow::zoomBy);
-    connect(m_edit, &RoundEdit::filesDropped, this, [this](const QStringList &paths) {
-        openDropped(paths.first());
+    connect(doc, &QTextDocument::contentsChanged, this, [this] {
+        if (!m_loading)
+            emit textEdited(text());
     });
+    connect(doc, &QTextDocument::undoAvailable, this, &NoteWindow::updateActions);
+    connect(doc, &QTextDocument::redoAvailable, this, &NoteWindow::updateActions);
+    connect(doc, &QTextDocument::contentsChanged, this, &NoteWindow::updateActions);
+    connect(m_edit, &RoundEdit::selectionChanged, this, &NoteWindow::updateActions);
+    connect(m_edit, &RoundEdit::cursorPositionChanged, this, qOverload<>(&QWidget::update));
+    connect(m_edit, &RoundEdit::zoomRequested, this, &NoteWindow::zoomBy);
     connect(m_edit, &RoundEdit::contextMenuRequested, this, [this](qreal angle) {
         m_radial->open(m_contextMenu, angle);
     });
@@ -110,7 +92,7 @@ TondoWindow::TondoWindow(QWidget *parent)
         m_edit->setFocus();
         update();
     });
-    connect(m_prompt, &RadialPrompt::buttonClicked, this, &TondoWindow::onPromptButton);
+    connect(m_prompt, &RadialPrompt::buttonClicked, this, &NoteWindow::onPromptButton);
     connect(m_prompt, &RadialPrompt::dismissed, this, [this] {
         m_promptMode = PromptMode::None;
         m_edit->setOuterMargin(0);
@@ -124,49 +106,107 @@ TondoWindow::TondoWindow(QWidget *parent)
     loadSettings();
     applyTheme();
     applyFont();
-    updateTitle();
     updateActions();
 }
 
-TondoWindow::~TondoWindow()
+NoteWindow::~NoteWindow()
 {
-    delete m_printer;
+    saveSettings();
+}
+
+void NoteWindow::setSheet(const QString &label, const QString &text)
+{
+    m_loading = true;
+    m_edit->setPlainText(text);
+    m_edit->document()->clearUndoRedoStacks();
+    m_edit->moveCursor(QTextCursor::End);
+    m_loading = false;
+    setWindowTitle(label);
+    updateActions();
+    update();
+}
+
+QString NoteWindow::text() const
+{
+    return m_edit->exactText();
+}
+
+void NoteWindow::openAt(const QPoint &globalCenter)
+{
+    m_maximized = false;
+    const QScreen *s = QGuiApplication::screenAt(globalCenter);
+    if (!s)
+        s = QGuiApplication::primaryScreen();
+    const QRect area = s->availableGeometry();
+    m_radius = qBound(kMinRadius, m_restoreRadius, maximumRadius());
+    const int reach = m_radius + kShadow;
+    // Out of the hole, but never off the screen.
+    const QPoint c(qBound(area.left() + reach, globalCenter.x(), qMax(area.left() + reach, area.right() - reach)),
+                   qBound(area.top() + reach, globalCenter.y(), qMax(area.top() + reach, area.bottom() - reach)));
+    setCircle(c, m_radius);
+    show();
+    raise();
+    activateWindow();
+    m_edit->setFocus();
+}
+
+void NoteWindow::putAway()
+{
+    if (!isVisible())
+        return;
+    m_radial->close();
+    m_prompt->dismiss();
+    if (!m_maximized)
+        m_restoreRadius = m_radius;
+    saveSettings();
+    hide();
+}
+
+// Switching to another app puts the note away, the way a sticky note folds
+// back when you look at something else. Checked from the event loop, since
+// focus passes through nothing on its way to one of our own dialogs.
+void NoteWindow::checkStillActive()
+{
+    if (!isVisible() || m_choosingFont || modalOpen())
+        return;
+    if (!QApplication::activeWindow())
+        emit putAwayRequested();
 }
 
 // ---------------------------------------------------------------------------
 // Geometry
 
-QPointF TondoWindow::center() const
+QPointF NoteWindow::center() const
 {
     return QPointF(width() / 2.0, height() / 2.0);
 }
 
-int TondoWindow::ringWidth() const
+int NoteWindow::ringWidth() const
 {
     return qBound(28, qRound(m_radius * 0.115), 44);
 }
 
-qreal TondoWindow::innerRadius() const
+qreal NoteWindow::innerRadius() const
 {
     return m_radius - ringWidth();
 }
 
-qreal TondoWindow::ringMid() const
+qreal NoteWindow::ringMid() const
 {
     return m_radius - ringWidth() / 2.0;
 }
 
-qreal TondoWindow::buttonRadius() const
+qreal NoteWindow::buttonRadius() const
 {
     return ringWidth() * 0.34;
 }
 
-QPointF TondoWindow::buttonCenter(Button button) const
+QPointF NoteWindow::buttonCenter(Button button) const
 {
     return Arc::polar(center(), ringMid(), Arc::radians(kButtonAngle[button]));
 }
 
-QFont TondoWindow::bezelFont(qreal scale, bool bold) const
+QFont NoteWindow::bezelFont(qreal scale, bool bold) const
 {
     QFont font(QStringLiteral("Segoe UI Variable Text"));
     font.setPixelSize(qMax(9, qRound(ringWidth() * scale)));
@@ -175,7 +215,7 @@ QFont TondoWindow::bezelFont(qreal scale, bool bold) const
     return font;
 }
 
-QList<TondoWindow::Header> TondoWindow::headers() const
+QList<NoteWindow::Header> NoteWindow::headers() const
 {
     QList<Header> out;
     const QFontMetricsF metrics(bezelFont(0.38, true));
@@ -193,7 +233,7 @@ QList<TondoWindow::Header> TondoWindow::headers() const
     return out;
 }
 
-TondoWindow::Zone TondoWindow::zoneAt(const QPointF &pos, int *index) const
+NoteWindow::Zone NoteWindow::zoneAt(const QPointF &pos, int *index) const
 {
     const qreal d = QLineF(center(), pos).length();
     if (d > m_radius)
@@ -221,14 +261,14 @@ TondoWindow::Zone TondoWindow::zoneAt(const QPointF &pos, int *index) const
     return Zone::Ring;
 }
 
-int TondoWindow::maximumRadius() const
+int NoteWindow::maximumRadius() const
 {
     const QScreen *s = screen() ? screen() : QGuiApplication::primaryScreen();
     const QRect area = s->availableGeometry();
     return qMax(kMinRadius, qMin(area.width(), area.height()) / 2 - kShadow);
 }
 
-void TondoWindow::setCircle(const QPoint &globalCenter, int radius)
+void NoteWindow::setCircle(const QPoint &globalCenter, int radius)
 {
     m_radius = qBound(kMinRadius, radius, maximumRadius());
     const int side = 2 * (m_radius + kShadow);
@@ -236,7 +276,7 @@ void TondoWindow::setCircle(const QPoint &globalCenter, int radius)
     update();
 }
 
-void TondoWindow::resizeEvent(QResizeEvent *)
+void NoteWindow::resizeEvent(QResizeEvent *)
 {
     // The OS can resize us too (a DPI change), so the radius follows the size.
     m_radius = width() / 2 - kShadow;
@@ -255,7 +295,7 @@ void TondoWindow::resizeEvent(QResizeEvent *)
 // ---------------------------------------------------------------------------
 // Painting
 
-TondoWindow::Theme TondoWindow::theme() const
+NoteWindow::Theme NoteWindow::theme() const
 {
     Theme t;
     t.dark = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
@@ -291,7 +331,7 @@ TondoWindow::Theme TondoWindow::theme() const
     return t;
 }
 
-void TondoWindow::paintEvent(QPaintEvent *)
+void NoteWindow::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
@@ -366,7 +406,7 @@ void TondoWindow::paintEvent(QPaintEvent *)
     // Title, in the arc between the menu bar and the buttons.
     if (!list.isEmpty()) {
         const qreal from = list.last().from + list.last().sweep + Arc::radians(4);
-        const qreal to = Arc::radians(kButtonAngle[MinimizeButton]) - buttonRadius() / mid - Arc::radians(3);
+        const qreal to = Arc::radians(kButtonAngle[MaximizeButton]) - buttonRadius() / mid - Arc::radians(3);
         if (to > from) {
             const QFont titleFont = bezelFont(0.38, false);
             const QString title = Arc::elide(QFontMetricsF(titleFont), windowTitle(), (to - from) * mid);
@@ -387,7 +427,7 @@ void TondoWindow::paintEvent(QPaintEvent *)
         drawButton(p, Button(b), t);
 }
 
-void TondoWindow::drawButton(QPainter &p, Button button, const Theme &t) const
+void NoteWindow::drawButton(QPainter &p, Button button, const Theme &t) const
 {
     const QPointF bc = buttonCenter(button);
     const qreal br = buttonRadius();
@@ -415,9 +455,6 @@ void TondoWindow::drawButton(QPainter &p, Button button, const Theme &t) const
     p.translate(bc);
     p.rotate(kButtonAngle[button] + 90);
     switch (button) {
-    case MinimizeButton:
-        p.drawLine(QPointF(-s, 0), QPointF(s, 0));
-        break;
     case MaximizeButton:
         // A round window maximizes to a bigger circle, so the glyph is one.
         p.drawEllipse(QPointF(0, 0), m_maximized ? s * 0.5 : s * 0.9, m_maximized ? s * 0.5 : s * 0.9);
@@ -435,7 +472,7 @@ void TondoWindow::drawButton(QPainter &p, Button button, const Theme &t) const
 // ---------------------------------------------------------------------------
 // Mouse and keyboard on the chrome
 
-void TondoWindow::mousePressEvent(QMouseEvent *event)
+void NoteWindow::mousePressEvent(QMouseEvent *event)
 {
     int index = -1;
     const Zone zone = zoneAt(event->position(), &index);
@@ -476,7 +513,7 @@ void TondoWindow::mousePressEvent(QMouseEvent *event)
     QWidget::mousePressEvent(event);
 }
 
-void TondoWindow::mouseMoveEvent(QMouseEvent *event)
+void NoteWindow::mouseMoveEvent(QMouseEvent *event)
 {
     if (m_resizing) {
         const qreal d = QLineF(m_resizeCenter, event->globalPosition()).length();
@@ -512,7 +549,7 @@ void TondoWindow::mouseMoveEvent(QMouseEvent *event)
     }
 }
 
-void TondoWindow::mouseReleaseEvent(QMouseEvent *event)
+void NoteWindow::mouseReleaseEvent(QMouseEvent *event)
 {
     if (m_resizing) {
         m_resizing = false;
@@ -530,7 +567,7 @@ void TondoWindow::mouseReleaseEvent(QMouseEvent *event)
     QWidget::mouseReleaseEvent(event);
 }
 
-void TondoWindow::mouseDoubleClickEvent(QMouseEvent *event)
+void NoteWindow::mouseDoubleClickEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton && zoneAt(event->position()) == Zone::Ring) {
         toggleMaximize();
@@ -539,7 +576,7 @@ void TondoWindow::mouseDoubleClickEvent(QMouseEvent *event)
     QWidget::mouseDoubleClickEvent(event);
 }
 
-void TondoWindow::leaveEvent(QEvent *)
+void NoteWindow::leaveEvent(QEvent *)
 {
     if (m_hoverButton != -1 || m_hoverHeader != -1) {
         m_hoverButton = -1;
@@ -548,17 +585,22 @@ void TondoWindow::leaveEvent(QEvent *)
     }
 }
 
-void TondoWindow::keyPressEvent(QKeyEvent *event)
+void NoteWindow::keyPressEvent(QKeyEvent *event)
 {
     // Escape in the text closes a Find or Replace ring left open beside it.
-    if (event->key() == Qt::Key_Escape && m_prompt->isOpen()) {
-        m_prompt->dismiss();
+    if (event->key() == Qt::Key_Escape) {
+        if (m_prompt->isOpen())
+            m_prompt->dismiss();
+        else if (m_radial->isOpen())
+            m_radial->close();
+        else
+            emit putAwayRequested();
         return;
     }
     QWidget::keyPressEvent(event);
 }
 
-void TondoWindow::openMenu(int header, bool fromKeyboard)
+void NoteWindow::openMenu(int header, bool fromKeyboard)
 {
     const QList<Header> list = headers();
     if (header < 0 || header >= list.size() || modalOpen())
@@ -572,17 +614,16 @@ void TondoWindow::openMenu(int header, bool fromKeyboard)
     update();
 }
 
-void TondoWindow::triggerButton(Button button)
+void NoteWindow::triggerButton(Button button)
 {
     switch (button) {
-    case MinimizeButton: showMinimized(); break;
     case MaximizeButton: toggleMaximize(); break;
-    case CloseButton: close(); break;
+    case CloseButton: emit putAwayRequested(); break;
     case ButtonCount: break;
     }
 }
 
-void TondoWindow::toggleMaximize()
+void NoteWindow::toggleMaximize()
 {
     if (m_maximized) {
         m_maximized = false;
@@ -599,91 +640,32 @@ void TondoWindow::toggleMaximize()
 // ---------------------------------------------------------------------------
 // Window events
 
-void TondoWindow::closeEvent(QCloseEvent *event)
+void NoteWindow::closeEvent(QCloseEvent *event)
 {
-    m_radial->close();
-
-    // Never ask inside closeEvent. While a close is being handled Qt accepts
-    // any further close request outright, so a second Alt+F4 or a taskbar
-    // Close during "Save changes?" would quit and lose the work. Refuse this
-    // close, ask from the event loop, then close again once answered.
-    if (modalOpen()) {
-        event->ignore();
-        return;
-    }
-    if (!m_closeConfirmed && hasUnsavedChanges()) {
-        event->ignore();
-        if (!m_closePending) {
-            m_closePending = true;
-            QTimer::singleShot(0, this, [this] {
-                const bool proceed = maybeSave();
-                m_closePending = false;
-                if (proceed) {
-                    m_closeConfirmed = true;
-                    close();
-                }
-            });
-        }
-        return;
-    }
-    m_prompt->dismiss();
-    saveSettings();
-    event->accept();
+    // Alt+F4 puts the note away. Quitting is on the Note menu and the tray.
+    event->ignore();
+    emit putAwayRequested();
 }
 
-bool TondoWindow::hasUnsavedChanges() const
-{
-    return m_edit->document()->isModified();
-}
-
-bool TondoWindow::modalOpen() const
+bool NoteWindow::modalOpen() const
 {
     return m_prompt->isOpen() && m_prompt->isModal();
 }
 
-void TondoWindow::openDropped(const QString &path)
+void NoteWindow::changeEvent(QEvent *event)
 {
-    // Out of the drop handler first: a prompt shown inside IDropTarget::Drop
-    // keeps Explorer's drag stuck until it is answered.
-    QTimer::singleShot(0, this, [this, path] {
-        if (maybeSave())
-            openPath(path);
-    });
-}
-
-void TondoWindow::changeEvent(QEvent *event)
-{
-    if (event->type() == QEvent::ActivationChange)
+    if (event->type() == QEvent::ActivationChange) {
         update();
+        if (!isActiveWindow())
+            QTimer::singleShot(0, this, &NoteWindow::checkStillActive);
+    }
     QWidget::changeEvent(event);
-}
-
-// A copy, never the proposed action: accepting a Shift-drag's move makes
-// Explorer delete the file that was dropped.
-void TondoWindow::dragEnterEvent(QDragEnterEvent *event)
-{
-    if (event->mimeData()->hasUrls()) {
-        event->setDropAction(Qt::CopyAction);
-        event->accept();
-    }
-}
-
-void TondoWindow::dropEvent(QDropEvent *event)
-{
-    for (const QUrl &url : event->mimeData()->urls()) {
-        if (url.isLocalFile()) {
-            event->setDropAction(Qt::CopyAction);
-            event->accept();
-            openDropped(url.toLocalFile());
-            return;
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
 // Menus and actions
 
-void TondoWindow::createActions()
+void NoteWindow::createActions()
 {
     auto add = [this](QMenu *menu, const QString &text, const QList<QKeySequence> &keys, auto &&slot) {
         QAction *action = menu->addAction(text);
@@ -695,17 +677,10 @@ void TondoWindow::createActions()
         return action;
     };
 
-    QMenu *file = new QMenu(tr("&File"), this);
-    add(file, tr("&New"), { QKeySequence::New }, [this] { newFile(); });
-    add(file, tr("New &Window"), { QKeySequence(tr("Ctrl+Shift+N")) }, [this] { newWindow(); });
-    add(file, tr("&Open..."), { QKeySequence::Open }, [this] { openFile(); });
-    add(file, tr("&Save"), { QKeySequence::Save }, [this] { save(); });
-    add(file, tr("Save &As..."), { QKeySequence(tr("Ctrl+Shift+S")) }, [this] { saveAs(); });
-    file->addSeparator();
-    add(file, tr("Page Set&up..."), {}, [this] { pageSetup(); });
-    add(file, tr("&Print..."), { QKeySequence::Print }, [this] { print(); });
-    file->addSeparator();
-    add(file, tr("E&xit"), {}, [this] { close(); });
+    QMenu *note = new QMenu(tr("&Note"), this);
+    add(note, tr("&Put Away"), {}, [this] { emit putAwayRequested(); });
+    note->addSeparator();
+    add(note, tr("&Quit WormholeNotes"), { QKeySequence(tr("Ctrl+Q")) }, [this] { emit quitRequested(); });
 
     QMenu *edit = new QMenu(tr("&Edit"), this);
     m_undo = add(edit, tr("&Undo"), { QKeySequence::Undo }, [this] { m_edit->undo(); });
@@ -731,8 +706,8 @@ void TondoWindow::createActions()
     m_sizeMenu = format->addMenu(tr("&Size"));
     m_familyGroup = new QActionGroup(this);
     m_sizeGroup = new QActionGroup(this);
-    connect(m_familyMenu, &QMenu::aboutToShow, this, &TondoWindow::rebuildFamilyMenu);
-    connect(m_sizeMenu, &QMenu::aboutToShow, this, &TondoWindow::rebuildSizeMenu);
+    connect(m_familyMenu, &QMenu::aboutToShow, this, &NoteWindow::rebuildFamilyMenu);
+    connect(m_sizeMenu, &QMenu::aboutToShow, this, &NoteWindow::rebuildSizeMenu);
     m_boldAction = add(format, tr("&Bold"), {}, [this](bool on) {
         m_baseFont.setBold(on);
         applyFont();
@@ -744,27 +719,6 @@ void TondoWindow::createActions()
     });
     m_italicAction->setCheckable(true);
     add(format, tr("&More Fonts..."), {}, [this] { chooseFont(); });
-    format->addSeparator();
-
-    QMenu *encodingMenu = format->addMenu(tr("&Encoding"));
-    m_encodingGroup = new QActionGroup(this);
-    for (const Encoding e : { Encoding::Utf8, Encoding::Utf8Bom, Encoding::Utf16LE, Encoding::Utf16BE,
-                              Encoding::Ansi }) {
-        QAction *action = encodingMenu->addAction(encodingName(e));
-        action->setCheckable(true);
-        action->setData(int(e));
-        m_encodingGroup->addAction(action);
-        connect(action, &QAction::triggered, this, [this, e] { setEncoding(e); });
-    }
-    QMenu *eolMenu = format->addMenu(tr("&Line Endings"));
-    m_lineEndingGroup = new QActionGroup(this);
-    for (const LineEnding e : { LineEnding::CRLF, LineEnding::LF, LineEnding::CR }) {
-        QAction *action = eolMenu->addAction(lineEndingName(e));
-        action->setCheckable(true);
-        action->setData(int(e));
-        m_lineEndingGroup->addAction(action);
-        connect(action, &QAction::triggered, this, [this, e] { setLineEnding(e); });
-    }
 
     QMenu *view = new QMenu(tr("&View"), this);
     QMenu *zoom = view->addMenu(tr("&Zoom"));
@@ -776,8 +730,6 @@ void TondoWindow::createActions()
         update();
     });
     m_statusAction->setCheckable(true);
-    m_onTopAction = add(view, tr("Always on &Top"), {}, [this](bool on) { setAlwaysOnTop(on); });
-    m_onTopAction->setCheckable(true);
     view->addSeparator();
     add(view, tr("Pre&vious Page"), { QKeySequence(Qt::CTRL | Qt::Key_PageUp) },
         [this] { m_edit->showPage(m_edit->currentPage() - 1); });
@@ -785,9 +737,9 @@ void TondoWindow::createActions()
         [this] { m_edit->showPage(m_edit->currentPage() + 1); });
 
     QMenu *help = new QMenu(tr("&Help"), this);
-    add(help, tr("&About Tondo"), {}, [this] { about(); });
+    add(help, tr("&About WormholeNotes"), {}, [this] { about(); });
 
-    m_menus = { file, edit, format, view, help };
+    m_menus = { note, edit, format, view, help };
 
     m_rootMenu = new QMenu(this);
     for (QMenu *menu : m_menus)
@@ -804,8 +756,8 @@ void TondoWindow::createActions()
     m_contextMenu->addSeparator();
     m_contextMenu->addAction(selectAll);
 
-    // Alt+letter opens that menu from its place on the bezel; F10 opens File.
-    const Qt::Key keys[] = { Qt::Key_F, Qt::Key_E, Qt::Key_O, Qt::Key_V, Qt::Key_H };
+    // Alt+letter opens that menu from its place on the bezel; F10 opens Note.
+    const Qt::Key keys[] = { Qt::Key_N, Qt::Key_E, Qt::Key_O, Qt::Key_V, Qt::Key_H };
     for (int i = 0; i < 5; ++i) {
         auto *shortcut = new QShortcut(QKeySequence(Qt::ALT | keys[i]), this);
         connect(shortcut, &QShortcut::activated, this, [this, i] { openMenu(i, true); });
@@ -817,9 +769,9 @@ void TondoWindow::createActions()
 // Both menus are refilled each time they open, so they always show the font
 // in use. clear() deletes the old actions, and a deleted action leaves its
 // group on its own, so the groups live as long as the window.
-void TondoWindow::rebuildFamilyMenu()
+void NoteWindow::rebuildFamilyMenu()
 {
-    // Monospaced faces first, since this is Notepad, then a few others worth
+    // Monospaced faces first, as Tondo had them, then a few others worth
     // reading at length. Only the ones actually installed appear.
     static const QStringList preferred = {
         QStringLiteral("Consolas"), QStringLiteral("Cascadia Mono"), QStringLiteral("Cascadia Code"),
@@ -848,7 +800,7 @@ void TondoWindow::rebuildFamilyMenu()
     }
 }
 
-void TondoWindow::rebuildSizeMenu()
+void NoteWindow::rebuildSizeMenu()
 {
     m_sizeMenu->clear();
     const int current = qRound(m_baseFont.pointSizeF());
@@ -864,7 +816,7 @@ void TondoWindow::rebuildSizeMenu()
     }
 }
 
-void TondoWindow::updateActions()
+void NoteWindow::updateActions()
 {
     QTextDocument *doc = m_edit->document();
     const bool selection = m_edit->textCursor().hasSelection();
@@ -878,20 +830,9 @@ void TondoWindow::updateActions()
     m_statusAction->setChecked(m_statusVisible);
     m_boldAction->setChecked(m_baseFont.bold());
     m_italicAction->setChecked(m_baseFont.italic());
-    for (QAction *action : m_encodingGroup->actions())
-        action->setChecked(action->data().toInt() == int(m_encoding));
-    for (QAction *action : m_lineEndingGroup->actions())
-        action->setChecked(action->data().toInt() == int(m_lineEnding));
 }
 
-void TondoWindow::updateTitle()
-{
-    const QString marker = m_edit->document()->isModified() ? QStringLiteral("*") : QString();
-    setWindowTitle(QStringLiteral("%1%2 - Tondo").arg(marker, displayName(m_path)));
-    update();
-}
-
-QString TondoWindow::statusText() const
+QString NoteWindow::statusText() const
 {
     if (!m_flash.isEmpty())
         return m_flash;
@@ -899,19 +840,18 @@ QString TondoWindow::statusText() const
     QString position = tr("Ln %1, Col %2").arg(cursor.blockNumber() + 1).arg(cursor.positionInBlock() + 1);
     if (cursor.hasSelection())
         position += tr(" (%1 selected)").arg(cursor.selectionEnd() - cursor.selectionStart());
-    const QStringList parts = { position, QStringLiteral("%1%").arg(m_zoom), lineEndingName(m_lineEnding),
-                                encodingName(m_encoding) };
+    const QStringList parts = { position, QStringLiteral("%1%").arg(m_zoom) };
     return parts.join(QStringLiteral("   ·   "));
 }
 
-void TondoWindow::flash(const QString &message)
+void NoteWindow::flash(const QString &message)
 {
     m_flash = message;
     m_flashTimer.start(3500);
     update();
 }
 
-void TondoWindow::applyTheme()
+void NoteWindow::applyTheme()
 {
     const Theme t = theme();
 
@@ -948,7 +888,7 @@ void TondoWindow::applyTheme()
     m_prompt->setColors(prompt);
 }
 
-void TondoWindow::applyFont()
+void NoteWindow::applyFont()
 {
     QFont font = m_baseFont;
     const qreal base = m_baseFont.pointSizeF() > 0 ? m_baseFont.pointSizeF() : 11.0;
@@ -958,12 +898,12 @@ void TondoWindow::applyFont()
     updateActions();
 }
 
-void TondoWindow::zoomBy(int steps)
+void NoteWindow::zoomBy(int steps)
 {
     setZoom(m_zoom + steps * 10);
 }
 
-void TondoWindow::setZoom(int percent)
+void NoteWindow::setZoom(int percent)
 {
     percent = qBound(kMinZoom, percent, kMaxZoom);
     if (percent == m_zoom)
@@ -973,19 +913,10 @@ void TondoWindow::setZoom(int percent)
     update();
 }
 
-void TondoWindow::setAlwaysOnTop(bool on)
-{
-    const QRect geometry = this->geometry();
-    setWindowFlag(Qt::WindowStaysOnTopHint, on);
-    setGeometry(geometry);
-    show();
-    m_onTopAction->setChecked(on);
-}
-
 // ---------------------------------------------------------------------------
 // Prompts
 
-int TondoWindow::ask(const QStringList &lines, const QList<QPair<QString, int>> &buttons, int defaultId,
+int NoteWindow::ask(const QStringList &lines, const QList<QPair<QString, int>> &buttons, int defaultId,
                      int cancelId)
 {
     // One question at a time. Resetting a prompt that is still waiting would
@@ -1002,210 +933,15 @@ int TondoWindow::ask(const QStringList &lines, const QList<QPair<QString, int>> 
     return m_prompt->exec();
 }
 
-void TondoWindow::tell(const QStringList &lines)
+void NoteWindow::tell(const QStringList &lines)
 {
     ask(lines, { { tr("OK"), OkId } }, OkId, OkId);
 }
 
 // ---------------------------------------------------------------------------
-// Files
-
-bool TondoWindow::maybeSave()
-{
-    if (!m_edit->document()->isModified())
-        return true;
-    const int answer = ask({ tr("Save changes to %1?").arg(displayName(m_path)) },
-                           { { tr("Save"), SaveId }, { tr("Don't Save"), DiscardId }, { tr("Cancel"), CancelId } },
-                           SaveId, CancelId);
-    if (answer == SaveId)
-        return save();
-    return answer == DiscardId;
-}
-
-void TondoWindow::newFile()
-{
-    if (!maybeSave())
-        return;
-    m_edit->clear();
-    m_path.clear();
-    m_encoding = Encoding::Utf8;
-    m_lineEnding = LineEnding::CRLF;
-    m_edit->document()->setModified(false);
-    updateTitle();
-    updateActions();
-}
-
-void TondoWindow::newWindow()
-{
-    QProcess::startDetached(QCoreApplication::applicationFilePath(), {});
-}
-
-void TondoWindow::openFile()
-{
-    if (!maybeSave())
-        return;
-    const QString dir = m_path.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
-                                         : QFileInfo(m_path).absolutePath();
-    const QString path = QFileDialog::getOpenFileName(this, tr("Open"), dir,
-                                                      tr("Text Documents (*.txt);;All Files (*.*)"));
-    if (!path.isEmpty())
-        openPath(path);
-}
-
-bool TondoWindow::openPath(const QString &path)
-{
-    TextFile file;
-    QString error;
-    if (!TextFile::read(path, file, &error)) {
-        tell({ tr("Cannot open %1").arg(QFileInfo(path).fileName()), error });
-        return false;
-    }
-    m_edit->setPlainText(file.text);
-    m_path = QFileInfo(path).absoluteFilePath();
-    m_encoding = file.encoding;
-    m_lineEnding = file.lineEnding;
-    m_edit->document()->setModified(false);
-    updateTitle();
-    updateActions();
-    return true;
-}
-
-bool TondoWindow::save()
-{
-    if (m_path.isEmpty())
-        return saveAs();
-    return writeTo(m_path);
-}
-
-bool TondoWindow::saveAs()
-{
-    const QString initial = m_path.isEmpty()
-        ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/*.txt")
-        : m_path;
-    const QString path = QFileDialog::getSaveFileName(this, tr("Save As"), initial,
-                                                      tr("Text Documents (*.txt);;All Files (*.*)"));
-    if (path.isEmpty())
-        return false;
-    return writeTo(path);
-}
-
-bool TondoWindow::writeTo(const QString &path)
-{
-    TextFile file;
-    file.text = m_edit->exactText();
-    file.encoding = m_encoding;
-    file.lineEnding = m_lineEnding;
-
-    if (!TextFile::canEncode(file.text, file.encoding)) {
-        const int answer = ask({ tr("Some characters cannot be saved as ANSI"),
-                                 tr("and would be written as question marks.") },
-                               { { tr("Save as UTF-8"), SaveId }, { tr("Save Anyway"), DiscardId },
-                                 { tr("Cancel"), CancelId } },
-                               SaveId, CancelId);
-        if (answer == CancelId)
-            return false;
-        if (answer == SaveId) {
-            m_encoding = file.encoding = Encoding::Utf8;
-            updateActions();
-        }
-    }
-
-    QString error;
-    if (!file.write(path, &error)) {
-        tell({ tr("Cannot save %1").arg(QFileInfo(path).fileName()), error });
-        return false;
-    }
-    m_path = QFileInfo(path).absoluteFilePath();
-    m_edit->document()->setModified(false);
-    updateTitle();
-    return true;
-}
-
-void TondoWindow::setEncoding(Encoding encoding)
-{
-    if (encoding != m_encoding) {
-        m_encoding = encoding;
-        m_edit->document()->setModified(true);
-    }
-    updateActions();
-    update();
-}
-
-void TondoWindow::setLineEnding(LineEnding lineEnding)
-{
-    if (lineEnding != m_lineEnding) {
-        m_lineEnding = lineEnding;
-        m_edit->document()->setModified(true);
-    }
-    updateActions();
-    update();
-}
-
-// ---------------------------------------------------------------------------
-// Printing
-
-void TondoWindow::pageSetup()
-{
-    QPageSetupDialog dialog(m_printer, this);
-    dialog.exec();
-}
-
-void TondoWindow::print()
-{
-    QPrintDialog dialog(m_printer, this);
-    if (dialog.exec() == QDialog::Accepted)
-        printTo(m_printer);
-}
-
-void TondoWindow::printTo(QPrinter *printer)
-{
-    RingTextLayout *layout = m_edit->ringLayout();
-    const qreal d = 2 * layout->outerRadius();
-    if (d <= 0)
-        return;
-
-    QPainter p;
-    if (!p.begin(printer)) {
-        tell({ tr("The printer could not be started.") });
-        return;
-    }
-
-    // The layout is in logical pixels, 96 to the inch. Print at the same
-    // physical size as on screen, shrinking only if a circle will not fit.
-    const QRectF area(QPointF(0, 0), printer->pageLayout().paintRectPixels(printer->resolution()).size());
-    const qreal footer = printer->resolution() * 0.35;
-    const qreal scale = qMin(printer->resolution() / 96.0, qMin(area.width(), area.height() - 2 * footer) / d);
-    const int pages = layout->pageCount();
-
-    QFont footerFont(QStringLiteral("Segoe UI"));
-    footerFont.setPointSizeF(9);
-
-    for (int page = 0; page < pages; ++page) {
-        if (page > 0)
-            printer->newPage();
-        p.save();
-        p.setRenderHint(QPainter::Antialiasing);
-        p.translate(area.center() - QPointF(0, footer / 2));
-        p.scale(scale, scale);
-        p.setPen(QPen(QColor(0, 0, 0, 90), 1.0));
-        p.setBrush(Qt::NoBrush);
-        p.drawEllipse(QPointF(0, 0), d / 2 - 0.5, d / 2 - 0.5);
-        p.drawEllipse(QPointF(0, 0), layout->hubRadius() - 4, layout->hubRadius() - 4);
-        layout->paintPage(&p, page, Qt::black, Qt::transparent, 0, 0);
-        p.restore();
-
-        p.setFont(footerFont);
-        p.setPen(Qt::black);
-        p.drawText(QRectF(area.left(), area.bottom() - footer, area.width(), footer), Qt::AlignCenter,
-                   tr("%1  ·  %2 of %3").arg(displayName(m_path)).arg(page + 1).arg(pages));
-    }
-    p.end();
-}
-
-// ---------------------------------------------------------------------------
 // Find, replace, go to
 
-void TondoWindow::showFind(bool replaceMode)
+void NoteWindow::showFind(bool replaceMode)
 {
     if (modalOpen())
         return;
@@ -1237,7 +973,7 @@ void TondoWindow::showFind(bool replaceMode)
     m_edit->setOuterMargin(m_prompt->depth());
 }
 
-SearchOptions TondoWindow::promptOptions() const
+SearchOptions NoteWindow::promptOptions() const
 {
     SearchOptions options = m_lastSearch;
     options.needle = m_prompt->fieldText(m_findField);
@@ -1249,7 +985,7 @@ SearchOptions TondoWindow::promptOptions() const
     return options;
 }
 
-void TondoWindow::onPromptButton(int id)
+void NoteWindow::onPromptButton(int id)
 {
     switch (id) {
     case FindNextId:
@@ -1269,7 +1005,7 @@ void TondoWindow::onPromptButton(int id)
     }
 }
 
-bool TondoWindow::findNext(bool backward)
+bool NoteWindow::findNext(bool backward)
 {
     if (m_lastSearch.needle.isEmpty()) {
         showFind(false);
@@ -1280,7 +1016,7 @@ bool TondoWindow::findNext(bool backward)
     return findWith(options);
 }
 
-bool TondoWindow::findWith(const SearchOptions &options)
+bool NoteWindow::findWith(const SearchOptions &options)
 {
     m_lastSearch = options;
     if (options.needle.isEmpty())
@@ -1308,7 +1044,7 @@ bool TondoWindow::findWith(const SearchOptions &options)
     return true;
 }
 
-void TondoWindow::replaceOne()
+void NoteWindow::replaceOne()
 {
     SearchOptions options = promptOptions();
     options.backward = false;
@@ -1321,7 +1057,7 @@ void TondoWindow::replaceOne()
     findWith(options);
 }
 
-void TondoWindow::replaceAll()
+void NoteWindow::replaceAll()
 {
     const SearchOptions options = promptOptions();
     m_lastSearch = options;
@@ -1349,7 +1085,7 @@ void TondoWindow::replaceAll()
                      : tr("Replaced %n occurrence(s)", nullptr, count));
 }
 
-void TondoWindow::goToLine()
+void NoteWindow::goToLine()
 {
     if (modalOpen())
         return;
@@ -1371,7 +1107,7 @@ void TondoWindow::goToLine()
     m_edit->setTextCursor(QTextCursor(doc->findBlockByNumber(line - 1)));
 }
 
-void TondoWindow::insertTimeDate()
+void NoteWindow::insertTimeDate()
 {
     const QLocale locale = QLocale::system();
     const QDateTime now = QDateTime::currentDateTime();
@@ -1379,26 +1115,29 @@ void TondoWindow::insertTimeDate()
                             + locale.toString(now.date(), QLocale::ShortFormat));
 }
 
-void TondoWindow::chooseFont()
+void NoteWindow::chooseFont()
 {
     bool ok = false;
+    m_choosingFont = true;
     const QFont font = QFontDialog::getFont(&ok, m_baseFont, this, tr("Font"));
+    m_choosingFont = false;
     if (ok) {
         m_baseFont = font;
         applyFont();
     }
 }
 
-void TondoWindow::about()
+void NoteWindow::about()
 {
-    tell({ tr("Tondo %1").arg(QCoreApplication::applicationVersion()), tr("A notepad in the round."),
+    tell({ tr("WormholeNotes %1").arg(QCoreApplication::applicationVersion()),
+           tr("A sticky note that tunnels through every window."), tr("Built on Tondo by Archon."),
            tr("Locke Werks") });
 }
 
 // ---------------------------------------------------------------------------
 // Settings
 
-void TondoWindow::loadSettings()
+void NoteWindow::loadSettings()
 {
     QSettings settings;
     m_baseFont = QFont(QStringLiteral("Consolas"), 11);
@@ -1408,24 +1147,14 @@ void TondoWindow::loadSettings()
     m_zoom = qBound(kMinZoom, settings.value(QStringLiteral("zoom"), 100).toInt(), kMaxZoom);
     m_statusVisible = settings.value(QStringLiteral("statusBar"), true).toBool();
 
-    QPoint c = settings.value(QStringLiteral("center")).toPoint();
-    if (!settings.contains(QStringLiteral("center")) || !QGuiApplication::screenAt(c))
-        c = QGuiApplication::primaryScreen()->availableGeometry().center();
-    setCircle(c, settings.value(QStringLiteral("radius"), kDefaultRadius).toInt());
-
-    if (settings.value(QStringLiteral("alwaysOnTop"), false).toBool()) {
-        setWindowFlag(Qt::WindowStaysOnTopHint, true);
-        m_onTopAction->setChecked(true);
-    }
+    m_restoreRadius = settings.value(QStringLiteral("radius"), kDefaultRadius).toInt();
 }
 
-void TondoWindow::saveSettings() const
+void NoteWindow::saveSettings() const
 {
     QSettings settings;
     settings.setValue(QStringLiteral("font"), m_baseFont.toString());
     settings.setValue(QStringLiteral("zoom"), m_zoom);
     settings.setValue(QStringLiteral("statusBar"), m_statusVisible);
-    settings.setValue(QStringLiteral("alwaysOnTop"), m_onTopAction->isChecked());
-    settings.setValue(QStringLiteral("center"), m_maximized ? m_restoreCenter : mapToGlobal(center()).toPoint());
-    settings.setValue(QStringLiteral("radius"), m_maximized ? m_restoreRadius : m_radius);
+    settings.setValue(QStringLiteral("radius"), m_maximized || !isVisible() ? m_restoreRadius : m_radius);
 }
