@@ -123,7 +123,9 @@ int RingTextLayout::layoutBlock(const QTextBlock &block, int first)
     option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
     option.setTextDirection(Qt::LeftToRight);
     layout->setTextOption(option);
-    layout->setCacheEnabled(true);
+    // No setCacheEnabled: it would hold the shaped glyphs of every block in the
+    // document, tens of bytes per character. Only the page on show is painted,
+    // and RoundEdit keeps that as a pixmap.
     layout->setPosition(QPointF(0, first * m_pitch));
 
     int count = 0;

@@ -5,7 +5,7 @@
 
 [product]
 name         = "Tondo"
-version      = "0.1.1"
+version      = "0.1.2"
 publisher    = "Locke Werks"
 description  = "A notepad in the round"
 copyright    = "Copyright (C) 2026 Locke Werks"

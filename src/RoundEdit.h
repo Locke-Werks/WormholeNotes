@@ -100,6 +100,7 @@ private:
     void invalidate();
     void rebuildCache();
     void paintHub(QPainter &painter);
+    void paintPreedit(QPainter &painter);
 
     QTextDocument *m_doc = nullptr;
     RingTextLayout *m_layout = nullptr;
@@ -122,6 +123,9 @@ private:
 
     QPixmap m_cache;
     bool m_cacheValid = false;
+
+    // Text an input method is composing and has not committed yet.
+    QString m_preedit;
 
     int m_wheelAccum = 0;
     int m_zoomAccum = 0;

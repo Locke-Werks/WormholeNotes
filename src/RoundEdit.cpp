@@ -440,10 +440,41 @@ void RoundEdit::paintEvent(QPaintEvent *)
     p.drawPixmap(0, 0, m_cache);
     paintHub(p);
 
+    if (!m_preedit.isEmpty()) {
+        paintPreedit(p);
+        return;
+    }
     if (hasFocus() && m_cursorOn) {
         p.translate(center());
         m_layout->paintCursor(&p, m_page, m_cursor.position(), m_colors.ink, 1.6);
     }
+}
+
+void RoundEdit::paintPreedit(QPainter &p)
+{
+    // Drawn over the ring at the cursor rather than laid into it: the text is
+    // not in the document until the input method commits it.
+    qreal x = 0;
+    const int ring = m_layout->ringOfPosition(m_cursor.position(), &x);
+    if (m_layout->pageOfRing(ring) != m_page)
+        return;
+    const RingTextLayout::Ring &g = m_layout->ring(ring);
+    const qreal from = g.start + x / g.mid;
+    const QFontMetricsF metrics(font());
+    const qreal sweep = Arc::sweepOf(metrics, m_preedit, g.mid);
+    const QPointF c = center();
+
+    p.fillPath(Arc::sector(c, g.baseline - m_layout->descent(), g.baseline + m_layout->ascent(), from, sweep),
+               m_colors.hub);
+    Arc::drawFrom(p, c, g.baseline + metrics.capHeight() / 2, from, m_preedit, font(), m_colors.ink, false);
+
+    QPainterPath underline;
+    const qreal r = g.baseline - m_layout->descent() * 0.5;
+    underline.arcMoveTo(QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r), -Arc::degrees(from));
+    underline.arcTo(QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r), -Arc::degrees(from), -Arc::degrees(sweep));
+    p.setPen(QPen(m_colors.ink, 1.2));
+    p.setBrush(Qt::NoBrush);
+    p.drawPath(underline);
 }
 
 // ---------------------------------------------------------------------------
@@ -580,6 +611,8 @@ void RoundEdit::inputMethodEvent(QInputMethodEvent *event)
         m_cursor.insertText(event->commitString());
         cursorMoved();
     }
+    m_preedit = event->preeditString();
+    update();
     event->accept();
 }
 
@@ -732,15 +765,21 @@ void RoundEdit::wheelEvent(QWheelEvent *event)
 // ---------------------------------------------------------------------------
 // Drag and drop
 
+// Every drop is taken as a copy, whatever was proposed. Accepting a proposed
+// move tells the source the data has been taken, and Explorer answers a moved
+// file by deleting the original.
 void RoundEdit::dragEnterEvent(QDragEnterEvent *event)
 {
-    if (event->mimeData()->hasUrls() || event->mimeData()->hasText())
-        event->acceptProposedAction();
+    if (event->mimeData()->hasUrls() || event->mimeData()->hasText()) {
+        event->setDropAction(Qt::CopyAction);
+        event->accept();
+    }
 }
 
 void RoundEdit::dragMoveEvent(QDragMoveEvent *event)
 {
-    event->acceptProposedAction();
+    event->setDropAction(Qt::CopyAction);
+    event->accept();
 }
 
 void RoundEdit::dropEvent(QDropEvent *event)
@@ -753,13 +792,15 @@ void RoundEdit::dropEvent(QDropEvent *event)
                 paths.append(url.toLocalFile());
         }
         if (!paths.isEmpty()) {
-            event->acceptProposedAction();
+            event->setDropAction(Qt::CopyAction);
+            event->accept();
             Q_EMIT filesDropped(paths);
             return;
         }
     }
     if (mime->hasText()) {
-        event->acceptProposedAction();
+        event->setDropAction(Qt::CopyAction);
+        event->accept();
         m_cursor.setPosition(m_layout->positionAt(m_page, event->position() - center()));
         QString text = mime->text();
         text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));

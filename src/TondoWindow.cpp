@@ -658,17 +658,22 @@ void TondoWindow::changeEvent(QEvent *event)
     QWidget::changeEvent(event);
 }
 
+// A copy, never the proposed action: accepting a Shift-drag's move makes
+// Explorer delete the file that was dropped.
 void TondoWindow::dragEnterEvent(QDragEnterEvent *event)
 {
-    if (event->mimeData()->hasUrls())
-        event->acceptProposedAction();
+    if (event->mimeData()->hasUrls()) {
+        event->setDropAction(Qt::CopyAction);
+        event->accept();
+    }
 }
 
 void TondoWindow::dropEvent(QDropEvent *event)
 {
     for (const QUrl &url : event->mimeData()->urls()) {
         if (url.isLocalFile()) {
-            event->acceptProposedAction();
+            event->setDropAction(Qt::CopyAction);
+            event->accept();
             openDropped(url.toLocalFile());
             return;
         }
