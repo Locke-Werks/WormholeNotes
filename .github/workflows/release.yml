@@ -10,10 +10,11 @@ env:
   FORGE_VERSION: v0.4.0
   QT_VERSION: '6.8.3'
 
+# Unsigned for now: Windows SmartScreen warns on first run. Signing comes back
+# when there is a certificate of our own.
 jobs:
   release:
     runs-on: windows-latest
-    environment: release
     permissions:
       contents: write
 
@@ -37,10 +38,11 @@ jobs:
           arch: win64_msvc2022_64
           cache: true
 
-      - name: Build
+      - name: Build and test
         run: |
           cmake --preset vs -DCMAKE_PREFIX_PATH="${{ env.QT_ROOT_DIR }}"
           cmake --build --preset release
+          ctest --test-dir build/vs -C Release --output-on-failure
 
       # Everything under stage/ lands on the user's disk byte for byte.
       - name: Stage the payload
@@ -49,8 +51,8 @@ jobs:
           cmake --install build/vs --config Release --prefix stage
           windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw --no-system-dxc-compiler stage/WormholeNotes.exe
 
-          # Qt and WormholeNotes link the dynamic MSVC runtime. Ship it beside the exe
-          # rather than depending on the redistributable being installed.
+          # Qt and WormholeNotes link the dynamic MSVC runtime. Ship it beside
+          # the exe rather than depending on the redistributable being installed.
           $vs  = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
           $crt = Get-ChildItem "$vs\VC\Redist\MSVC" -Directory | Where-Object Name -match '^\d' |
                  Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1 |
@@ -60,34 +62,6 @@ jobs:
           foreach ($dll in 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll') {
             Copy-Item (Join-Path $crt.FullName $dll) stage/
           }
-
-      # Only WormholeNotes.exe. The Qt and CRT DLLs already carry their vendors'
-      # signatures, and re-signing them would replace those.
-      - name: Sign the payload
-        uses: azure/trusted-signing-action@v0
-        with:
-          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: https://eus.codesigning.azure.net
-          trusted-signing-account-name: specterpoint
-          certificate-profile-name: specterpoint
-          files-folder: stage
-          files-folder-filter: exe
-          files-folder-recurse: false
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-
-      - name: Verify every payload binary is signed
-        shell: pwsh
-        run: |
-          $bad = Get-ChildItem stage -Recurse -Include *.exe, *.dll | ForEach-Object {
-            $sig = Get-AuthenticodeSignature $_.FullName
-            "{0,-50} {1}" -f $_.Name, $sig.Status | Write-Host
-            if ($sig.Status -ne 'Valid') { $_.Name }
-          }
-          if ($bad) { throw "unsigned payload: $($bad -join ', ')" }
 
       - name: Fetch Forge
         shell: pwsh
@@ -101,7 +75,6 @@ jobs:
             if ($sig.Status -ne 'Valid') { throw "tools/$name is $($sig.Status)" }
           }
 
-      # No --sign: that flag only works inside the Forge repo.
       - name: Forge the installer
         shell: pwsh
         run: |
@@ -109,36 +82,16 @@ jobs:
             --out "dist/WormholeNotes-$env:VERSION-Setup.exe"
           if ($LASTEXITCODE -ne 0) { throw "lwforge exited $LASTEXITCODE" }
 
-      - name: Sign the installer
-        uses: azure/trusted-signing-action@v0
-        with:
-          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: https://eus.codesigning.azure.net
-          trusted-signing-account-name: specterpoint
-          certificate-profile-name: specterpoint
-          files-folder: dist
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-
-      - name: Verify the installer
+      - name: Check the installer
         shell: pwsh
         run: |
           $setup = "dist/WormholeNotes-$env:VERSION-Setup.exe"
-          $sig = Get-AuthenticodeSignature $setup
-          "installer: $($sig.Status)  $($sig.SignerCertificate.Subject)"
-          if ($sig.Status -ne 'Valid') { throw "installer is $($sig.Status)" }
-
-          # Proves signing did not orphan the appended container. Captured whole
-          # before trimming: cutting the pipe early breaks it under lwforge,
-          # which then exits non-zero on a healthy installer.
+          # Captured whole before trimming: cutting the pipe early breaks it
+          # under lwforge, which then exits non-zero on a healthy installer.
           $inspect = ./tools/lwforge.exe inspect $setup 2>&1
           $code = $LASTEXITCODE
           $inspect | Select-Object -First 12
-          if ($code -ne 0) { throw "the signed installer cannot read its own container" }
+          if ($code -ne 0) { throw "the installer cannot read its own container" }
 
           $report = & $setup --check-only /O:desktop=off 2>&1 | Out-String
           $report

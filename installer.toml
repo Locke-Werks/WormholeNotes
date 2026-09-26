@@ -75,11 +75,27 @@ label   = "Add a desktop shortcut"
 detail  = "Puts WormholeNotes on the shared desktop."
 default = false
 
+[[options]]
+id      = "sign_in"
+label   = "Start WormholeNotes when you sign in"
+detail  = "The hole only rides your windows while WormholeNotes is running."
+default = true
+
 [[actions]]
 type   = "shortcut"
 target = '{InstallDir}\WormholeNotes.exe'
 name   = "WormholeNotes"
 when   = "start_menu"
+
+# No hive: it follows the install scope, so this is the machine-wide Run key
+# and starts WormholeNotes for everyone who signs in.
+[[actions]]
+type       = "registry_write"
+key        = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+name       = "WormholeNotes"
+value      = '"{InstallDir}\WormholeNotes.exe"'
+value_type = "sz"
+when       = "sign_in"
 
 [[actions]]
 type   = "shortcut"

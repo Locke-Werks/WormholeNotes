@@ -5,5 +5,3 @@ dist/
 *.user
 CMakeUserPresets.json
 .reliquary-project
-# Local signing only; CI signing builds its own. See scripts/sign.ps1.
-signing/metadata.json
