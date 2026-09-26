@@ -16,15 +16,18 @@
 #include <QLocale>
 #include <QMenu>
 #include <QPainter>
+#include <QPainterPath>
 #include <QScreen>
 #include <QSettings>
 #include <QShortcut>
 #include <QStyleHints>
 #include <QTextBlock>
 #include <QTextDocument>
+#include <QWheelEvent>
 #include <QWindow>
 
 #include <cmath>
+#include <numbers>
 
 namespace {
 
@@ -85,6 +88,7 @@ NoteWindow::NoteWindow(QWidget *parent)
     connect(m_edit, &RoundEdit::selectionChanged, this, &NoteWindow::updateActions);
     connect(m_edit, &RoundEdit::cursorPositionChanged, this, qOverload<>(&QWidget::update));
     connect(m_edit, &RoundEdit::zoomRequested, this, &NoteWindow::zoomBy);
+    connect(m_edit, &RoundEdit::sheetTurnRequested, this, &NoteWindow::sheetTurnRequested);
     connect(m_edit, &RoundEdit::contextMenuRequested, this, [this](qreal angle) {
         m_radial->open(m_contextMenu, angle);
     });
@@ -114,16 +118,129 @@ NoteWindow::~NoteWindow()
     saveSettings();
 }
 
-void NoteWindow::setSheet(const QString &label, const QString &text)
+void NoteWindow::setSheet(const QString &label, const QString &text, int index, int count, bool fromEnd)
 {
     m_loading = true;
     m_edit->setPlainText(text);
     m_edit->document()->clearUndoRedoStacks();
-    m_edit->moveCursor(QTextCursor::End);
+    m_edit->setSheetMarker(index, count);
+    if (fromEnd) {
+        m_edit->moveCursor(QTextCursor::End);
+        m_edit->showPage(m_edit->pageCount() - 1);
+    } else {
+        m_edit->moveCursor(QTextCursor::Start);
+        m_edit->showPage(0);
+    }
     m_loading = false;
     setWindowTitle(label);
     updateActions();
     update();
+}
+
+void NoteWindow::setRing(const QList<RingPlace> &places, int current)
+{
+    m_ring = places;
+    m_ringCurrent = qBound(0, current, qMax(0, int(places.size()) - 1));
+    update();
+}
+
+// ---------------------------------------------------------------------------
+// The ring of places
+
+// Evenly round the rim, clockwise from noon, where the desktop always sits.
+qreal NoteWindow::placeAngle(int index) const
+{
+    const int n = qMax(1, int(m_ring.size()));
+    return Arc::radians(-90.0 + 360.0 * index / n);
+}
+
+qreal NoteWindow::clipAngle() const
+{
+    return m_clipDragging ? m_clipDragAngle : placeAngle(m_ringCurrent);
+}
+
+QPointF NoteWindow::clipCenter() const
+{
+    return Arc::polar(center(), m_radius - 2, clipAngle());
+}
+
+int NoteWindow::nearestPlace(qreal angle) const
+{
+    int best = 0;
+    qreal bestDistance = 10;
+    for (int i = 0; i < m_ring.size(); ++i) {
+        qreal d = std::fmod(std::abs(angle - placeAngle(i)), 2 * std::numbers::pi);
+        d = qMin(d, 2 * std::numbers::pi - d);
+        if (d < bestDistance) {
+            bestDistance = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
+void NoteWindow::turnToPlace(int index)
+{
+    if (m_ring.isEmpty())
+        return;
+    index = (index % int(m_ring.size()) + int(m_ring.size())) % int(m_ring.size());
+    if (index == m_ringCurrent)
+        return;
+    m_ringCurrent = index;
+    update();
+    emit placeTurned(m_ring.at(index).key);
+}
+
+void NoteWindow::drawRing(QPainter &p, const Theme &t) const
+{
+    if (m_ring.size() < 2)
+        return;
+    const QPointF c = center();
+
+    // A notch on the rim for every open place, bright where there is writing.
+    for (int i = 0; i < m_ring.size(); ++i) {
+        const QPointF at = Arc::polar(c, m_radius - 3.5, placeAngle(i));
+        p.setPen(Qt::NoPen);
+        p.setBrush(m_ring.at(i).written ? t.ringInk : t.ringDim);
+        const qreal dot = m_ring.at(i).written ? 2.2 : 1.5;
+        p.drawEllipse(at, dot, dot);
+    }
+
+    // The binder clip, gripping the rim at the current place. Drawn turned to
+    // the radius: local -y points out from the centre.
+    const qreal a = clipAngle();
+    p.save();
+    p.translate(Arc::polar(c, m_radius, a));
+    p.rotate(Arc::degrees(a) + 90);
+    // The wire handles, folded back out past the rim, behind the body.
+    const QColor steel(0xd4, 0xd8, 0xe0);
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(QColor(0, 0, 0, 90), 2.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    QPainterPath wire;
+    wire.moveTo(-7, -6);
+    wire.cubicTo(-9, -16, 9, -16, 7, -6);
+    p.drawPath(wire);
+    p.setPen(QPen(m_clipDragging ? steel.lighter(115) : steel, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.drawPath(wire);
+
+    // The black jaw, gripping the rim: wide where it bites, narrower inside.
+    QLinearGradient body(-12, 0, 12, 0);
+    body.setColorAt(0, QColor(0x18, 0x18, 0x1c));
+    body.setColorAt(0.45, QColor(0x4a, 0x4a, 0x52));
+    body.setColorAt(1, QColor(0x10, 0x10, 0x14));
+    p.setPen(QPen(QColor(0, 0, 0, 160), 0.8));
+    p.setBrush(body);
+    QPainterPath jaw;
+    jaw.moveTo(-12, -7);
+    jaw.lineTo(12, -7);
+    jaw.lineTo(8, 4);
+    jaw.lineTo(-8, 4);
+    jaw.closeSubpath();
+    p.drawPath(jaw);
+    // The steel band where the handles hinge.
+    p.setPen(QPen(steel, 1.2, Qt::SolidLine, Qt::RoundCap));
+    p.drawLine(QPointF(-11, -6), QPointF(11, -6));
+    p.restore();
 }
 
 QString NoteWindow::text() const
@@ -236,6 +353,8 @@ QList<NoteWindow::Header> NoteWindow::headers() const
 NoteWindow::Zone NoteWindow::zoneAt(const QPointF &pos, int *index) const
 {
     const qreal d = QLineF(center(), pos).length();
+    if (m_ring.size() > 1 && QLineF(clipCenter(), pos).length() <= 12)
+        return Zone::Clip;
     if (d > m_radius)
         return Zone::Outside;
     if (d < innerRadius())
@@ -425,6 +544,8 @@ void NoteWindow::paintEvent(QPaintEvent *)
 
     for (int b = 0; b < ButtonCount; ++b)
         drawButton(p, Button(b), t);
+
+    drawRing(p, t);
 }
 
 void NoteWindow::drawButton(QPainter &p, Button button, const Theme &t) const
@@ -486,6 +607,12 @@ void NoteWindow::mousePressEvent(QMouseEvent *event)
         case Zone::Header:
             openMenu(index, false);
             return;
+        case Zone::Clip:
+            m_radial->close();
+            m_clipDragging = true;
+            m_clipDragAngle = Arc::angleOf(center(), event->position());
+            update();
+            return;
         case Zone::Edge:
             m_radial->close();
             m_resizing = true;
@@ -520,6 +647,12 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
         setCircle(m_resizeCenter.toPoint(), qRound(d + m_resizeOffset));
         return;
     }
+    if (m_clipDragging) {
+        m_clipDragAngle = Arc::angleOf(center(), event->position());
+        m_flash = m_ring.at(nearestPlace(m_clipDragAngle)).label;
+        update();
+        return;
+    }
 
     int index = -1;
     const Zone zone = zoneAt(event->position(), &index);
@@ -542,6 +675,8 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
             setCursor(Qt::SizeVerCursor);
         else
             setCursor(Qt::SizeBDiagCursor);
+    } else if (zone == Zone::Clip) {
+        setCursor(Qt::OpenHandCursor);
     } else if (zone == Zone::Button || zone == Zone::Header) {
         setCursor(Qt::PointingHandCursor);
     } else {
@@ -553,6 +688,14 @@ void NoteWindow::mouseReleaseEvent(QMouseEvent *event)
 {
     if (m_resizing) {
         m_resizing = false;
+        return;
+    }
+    if (m_clipDragging) {
+        m_clipDragging = false;
+        m_flash.clear();
+        const int nearest = nearestPlace(Arc::angleOf(center(), event->position()));
+        update();
+        turnToPlace(nearest);
         return;
     }
     if (m_pressed >= 0) {
@@ -574,6 +717,32 @@ void NoteWindow::mouseDoubleClickEvent(QMouseEvent *event)
         return;
     }
     QWidget::mouseDoubleClickEvent(event);
+}
+
+// The wheel over the bezel turns the clip, one place per notch.
+void NoteWindow::wheelEvent(QWheelEvent *event)
+{
+    const Zone zone = zoneAt(event->position());
+    if (zone == Zone::Face || zone == Zone::Outside || m_ring.size() < 2) {
+        QWidget::wheelEvent(event);
+        return;
+    }
+    const int delta = event->angleDelta().y();
+    if ((delta > 0) != (m_wheelAccum > 0))
+        m_wheelAccum = 0;
+    m_wheelAccum += delta;
+    int steps = 0;
+    while (m_wheelAccum >= 120) {
+        m_wheelAccum -= 120;
+        --steps;
+    }
+    while (m_wheelAccum <= -120) {
+        m_wheelAccum += 120;
+        ++steps;
+    }
+    if (steps != 0)
+        turnToPlace(m_ringCurrent + steps);
+    event->accept();
 }
 
 void NoteWindow::leaveEvent(QEvent *)
@@ -678,6 +847,17 @@ void NoteWindow::createActions()
     };
 
     QMenu *note = new QMenu(tr("&Note"), this);
+    add(note, tr("&New Sheet"), { QKeySequence::New }, [this] { emit newSheetRequested(); });
+    add(note, tr("&Delete Sheet"), {}, [this] {
+        if (!m_edit->document()->isEmpty()) {
+            const int answer = ask({ tr("Delete this sheet?") },
+                                   { { tr("Delete"), OkId }, { tr("Cancel"), CancelId } }, CancelId, CancelId);
+            if (answer != OkId)
+                return;
+        }
+        emit deleteSheetRequested();
+    });
+    note->addSeparator();
     add(note, tr("&Put Away"), {}, [this] { emit putAwayRequested(); });
     note->addSeparator();
     add(note, tr("&Quit WormholeNotes"), { QKeySequence(tr("Ctrl+Q")) }, [this] { emit quitRequested(); });

@@ -1,7 +1,11 @@
 #include "PlaceTracker.h"
 
+#include "BrowserReader.h"
+
 #include <QFileInfo>
 #include <QRegularExpression>
+
+#include <algorithm>
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
@@ -33,6 +37,8 @@ const QStringList kTransientClasses = {
     QStringLiteral("TopLevelWindowForOverflowXamlIsland"),
 };
 
+const QString kDesktopKey = QStringLiteral("desktop");
+
 QString windowClass(HWND hwnd)
 {
     wchar_t buffer[256] = {};
@@ -50,10 +56,9 @@ QString windowTitle(HWND hwnd)
     return QString::fromWCharArray(buffer.data(), n);
 }
 
-QString processPath(HWND hwnd, DWORD *pid)
+QString processPath(DWORD pid, qint64 *created)
 {
-    GetWindowThreadProcessId(hwnd, pid);
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, *pid);
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!process)
         return {};
     wchar_t buffer[MAX_PATH * 2] = {};
@@ -61,14 +66,16 @@ QString processPath(HWND hwnd, DWORD *pid)
     QString path;
     if (QueryFullProcessImageNameW(process, 0, buffer, &size))
         path = QString::fromWCharArray(buffer, int(size));
+    FILETIME creation{}, exit{}, kernel{}, user{};
+    if (created && GetProcessTimes(process, &creation, &exit, &kernel, &user))
+        *created = qint64((quint64(creation.dwHighDateTime) << 32) | creation.dwLowDateTime);
     CloseHandle(process);
     return path;
 }
 
 // "Page - Google Chrome", "Page — Mozilla Firefox", "Page and 3 more pages -
 // Personal - Microsoft Edge". The page is everything before the browser's own
-// name. Titles change as pages load, so this layer is the least stable of the
-// three and the first to be replaced when the address bar can be read.
+// name. It is also what the tab strip calls the tab.
 QString pageFromTitle(QString title)
 {
     static const QRegularExpression separator(QStringLiteral("\\s+[-\u2014\u2013]\\s+"));
@@ -82,6 +89,22 @@ QString pageFromTitle(QString title)
     title = parts.join(QStringLiteral(" - ")).trimmed();
     title.remove(morePages);
     return title;
+}
+
+// "notes.txt - Notepad" is Notepad. Most apps end their title with their own
+// name, which is what a place is called on the ring.
+QString appLabel(const QString &title, const QString &appName)
+{
+    static const QRegularExpression separator(QStringLiteral("\\s+[-\u2014\u2013|]\\s+"));
+    const QStringList parts = title.split(separator, Qt::SkipEmptyParts);
+    if (!parts.isEmpty())
+        return parts.last().trimmed();
+    return appName;
+}
+
+bool sameTab(const QString &tab, const QString &seen)
+{
+    return !tab.isEmpty() && !seen.isEmpty() && (tab.startsWith(seen) || seen.startsWith(tab));
 }
 
 } // namespace
@@ -118,9 +141,28 @@ PlaceTracker::PlaceTracker(QObject *parent)
     m_settle.setInterval(60);
     connect(&m_settle, &QTimer::timeout, this, &PlaceTracker::resolve);
     // A slow check for anything the events missed, such as a refused
-    // activation that Windows grants later without raising a second event.
+    // activation that Windows grants later without raising a second event,
+    // and the walk that finds which places are still open.
     m_poll.setInterval(750);
-    connect(&m_poll, &QTimer::timeout, this, &PlaceTracker::resolve);
+    connect(&m_poll, &QTimer::timeout, this, [this] {
+        resolve();
+        refreshOpen();
+    });
+
+    OpenPlace desktop;
+    desktop.place.key = kDesktopKey;
+    desktop.place.label = tr("Desktop");
+    desktop.order = -1;
+    m_open.insert(kDesktopKey, desktop);
+
+    m_reader = new BrowserReader;
+    m_reader->moveToThread(&m_readerThread);
+    connect(&m_readerThread, &QThread::finished, m_reader, &QObject::deleteLater);
+    connect(this, &PlaceTracker::requestAddress, m_reader, &BrowserReader::readAddress);
+    connect(this, &PlaceTracker::requestTabs, m_reader, &BrowserReader::readTabs);
+    connect(m_reader, &BrowserReader::addressRead, this, &PlaceTracker::onAddressRead);
+    connect(m_reader, &BrowserReader::tabsRead, this, &PlaceTracker::onTabsRead);
+    m_readerThread.start();
 }
 
 PlaceTracker::~PlaceTracker()
@@ -130,6 +172,8 @@ PlaceTracker::~PlaceTracker()
     if (m_objectHook)
         UnhookWinEvent(HWINEVENTHOOK(m_objectHook));
     g_tracker = nullptr;
+    m_readerThread.quit();
+    m_readerThread.wait();
 }
 
 void PlaceTracker::start()
@@ -142,29 +186,28 @@ void PlaceTracker::start()
     // LOCATIONCHANGE and NAMECHANGE are adjacent, so one hook takes both.
     m_objectHook = quintptr(SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_NAMECHANGE, nullptr,
                                             &PlaceTrackerHooks::onEvent, 0, 0, flags));
+    // Ranks come from the first walk, so it runs before any place is set.
+    refreshOpen();
     resolve();
     m_poll.start();
 }
 
-bool PlaceTracker::placeFor(quintptr h, Place *place) const
+bool PlaceTracker::describe(quintptr h, Window *w, bool forRing) const
 {
     HWND hwnd = HWND(h);
-    if (!hwnd || !IsWindow(hwnd)) {
+    if (!hwnd || !IsWindow(hwnd))
         return false;
-    }
     hwnd = GetAncestor(hwnd, GA_ROOT);
 
     DWORD pid = 0;
-    const QString path = processPath(hwnd, &pid);
+    GetWindowThreadProcessId(hwnd, &pid);
     if (pid == GetCurrentProcessId())
         return false;
 
     const QString cls = windowClass(hwnd);
     if (cls == QLatin1String("Progman") || cls == QLatin1String("WorkerW")) {
-        place->key = QStringLiteral("desktop");
-        place->label = QObject::tr("Desktop");
-        place->hwnd = 0;
-        return true;
+        w->desktop = true;
+        return !forRing;
     }
     if (kTransientClasses.contains(cls) || !IsWindowVisible(hwnd))
         return false;
@@ -174,25 +217,56 @@ bool PlaceTracker::placeFor(quintptr h, Place *place) const
     if (cloaked)
         return false;
 
-    const QString exe = QFileInfo(path).fileName().toLower();
-    if (exe.isEmpty())
-        return false;
-    const QString title = windowTitle(hwnd);
-
-    place->hwnd = quintptr(hwnd);
-    if (kBrowsers.contains(exe)) {
-        const QString page = pageFromTitle(title);
-        place->key = exe + u'|' + page;
-        place->label = page.isEmpty() ? QFileInfo(path).completeBaseName() : page;
-    } else if (exe == QLatin1String("applicationframehost.exe")) {
-        // Store apps all run under one host; the title is what tells them apart.
-        place->key = exe + u'|' + title;
-        place->label = title;
-    } else {
-        place->key = exe;
-        place->label = title.isEmpty() ? QFileInfo(path).completeBaseName() : title;
+    w->title = windowTitle(hwnd);
+    if (forRing) {
+        // What Alt+Tab would show: an unowned window, or one that asks for a
+        // taskbar button, never a tool window, and with a title.
+        const LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        const bool owned = GetWindow(hwnd, GW_OWNER) != nullptr;
+        if ((ex & WS_EX_TOOLWINDOW) || (owned && !(ex & WS_EX_APPWINDOW)) || w->title.isEmpty())
+            return false;
     }
+
+    const QString path = processPath(pid, &w->created);
+    w->exe = QFileInfo(path).fileName().toLower();
+    if (w->exe.isEmpty())
+        return false;
+    w->appName = QFileInfo(path).completeBaseName();
+    w->hwnd = quintptr(hwnd);
+    w->browser = kBrowsers.contains(w->exe);
     return true;
+}
+
+Place PlaceTracker::appPlace(const Window &w) const
+{
+    Place place;
+    place.hwnd = w.hwnd;
+    if (w.exe == QLatin1String("applicationframehost.exe")) {
+        // Store apps all run under one host; the title is what tells them apart.
+        place.key = w.exe + u'|' + w.title;
+        place.label = w.title;
+    } else {
+        place.key = w.exe;
+        place.label = appLabel(w.title, w.appName);
+    }
+    return place;
+}
+
+Place PlaceTracker::browserPlace(const Window &w, const QString &page) const
+{
+    Place place;
+    place.hwnd = w.hwnd;
+    if (!page.isEmpty()) {
+        place.key = w.exe + u'|' + page;
+        place.label = page;
+    } else {
+        // The address bar could not be read, so the title stands in, the
+        // least stable of the layers since it changes as a page loads.
+        const QString title = pageFromTitle(w.title);
+        place.key = w.exe + QStringLiteral("|title|") + title;
+        place.label = title.isEmpty() ? w.appName : title;
+    }
+    return place;
 }
 
 void PlaceTracker::onForeground(quintptr)
@@ -206,16 +280,240 @@ void PlaceTracker::onForeground(quintptr)
 
 void PlaceTracker::resolve()
 {
-    const quintptr hwnd = quintptr(GetForegroundWindow());
-    Place place;
-    if (!placeFor(hwnd, &place))
+    Window w;
+    if (!describe(quintptr(GetForegroundWindow()), &w, false))
         return;
+    if (w.desktop) {
+        setPlace(m_open.value(kDesktopKey).place, {});
+        return;
+    }
+    if (!w.browser) {
+        setPlace(appPlace(w), {});
+        return;
+    }
+    // A browser's place is its page, which takes a read of the address bar.
+    // The read is asked for again only when the title changes, since that is
+    // what a new page or a different tab looks like from outside.
+    if (m_readTitle.contains(w.hwnd) && m_readTitle.value(w.hwnd) == w.title) {
+        setPlace(browserPlace(w, m_pageOf.value(w.hwnd)), pageFromTitle(w.title));
+        return;
+    }
+    if (m_pendingHwnd == w.hwnd && m_pendingTitle == w.title)
+        return;
+    m_pendingHwnd = w.hwnd;
+    m_pendingTitle = w.title;
+    emit requestAddress(w.hwnd);
+}
+
+void PlaceTracker::onAddressRead(quintptr hwnd, const QString &page)
+{
+    if (hwnd != m_pendingHwnd)
+        return;
+    m_pageOf.insert(hwnd, page);
+    m_readTitle.insert(hwnd, m_pendingTitle);
+    m_pendingHwnd = 0;
+    m_pendingTitle.clear();
+    resolve();
+}
+
+void PlaceTracker::setPlace(const Place &place, const QString &pageTitle)
+{
+    addOpen(place, pageTitle);
     if (place == m_place) {
         m_place.label = place.label;
         return;
     }
     m_place = place;
     emit placeChanged(m_place);
+}
+
+void PlaceTracker::addOpen(const Place &place, const QString &pageTitle)
+{
+    auto it = m_open.find(place.key);
+    const bool added = it == m_open.end();
+    if (added) {
+        OpenPlace open;
+        open.place = place;
+        if (place.key != kDesktopKey) {
+            Window w;
+            describe(place.hwnd, &w, false);
+            open.order = rankFor(w.exe, w.created) * 1000;
+            open.browser = w.browser;
+            if (w.browser) {
+                // Pages follow their browser, in the order they were visited.
+                qint64 last = open.order;
+                for (const OpenPlace &other : std::as_const(m_open)) {
+                    if (other.order > last && other.order < open.order + 1000)
+                        last = other.order;
+                }
+                open.order = last + 1;
+            }
+        }
+        it = m_open.insert(place.key, open);
+    }
+    it->place.label = place.label;
+    it->place.hwnd = place.hwnd;
+    if (!pageTitle.isEmpty())
+        it->titles[place.hwnd].insert(pageTitle);
+    if (added)
+        emit openPlacesChanged();
+}
+
+qint64 PlaceTracker::rankFor(const QString &exe, qint64)
+{
+    if (auto it = m_rank.constFind(exe); it != m_rank.constEnd())
+        return *it;
+    const qint64 rank = ++m_nextRank;
+    m_rank.insert(exe, rank);
+    return rank;
+}
+
+void PlaceTracker::refreshOpen()
+{
+    QList<quintptr> handles;
+    EnumWindows(
+        [](HWND hwnd, LPARAM data) -> BOOL {
+            reinterpret_cast<QList<quintptr> *>(data)->append(quintptr(hwnd));
+            return TRUE;
+        },
+        LPARAM(&handles));
+
+    QList<Window> windows;
+    for (const quintptr h : handles) {
+        Window w;
+        if (describe(h, &w, true))
+            windows.append(w);
+    }
+
+    // The first walk ranks what is already running by when it started, the
+    // closest outside view of taskbar order. Anything later joins the end,
+    // which is where the taskbar puts it too.
+    if (!m_ranked) {
+        QList<Window> byStart = windows;
+        std::stable_sort(byStart.begin(), byStart.end(),
+                         [](const Window &a, const Window &b) { return a.created < b.created; });
+        for (const Window &w : byStart)
+            rankFor(w.exe, w.created);
+        m_ranked = true;
+    }
+
+    QSet<QString> liveApps;
+    QSet<quintptr> liveBrowsers;
+    QList<quintptr> browserWindows;
+    bool changed = false;
+    for (const Window &w : std::as_const(windows)) {
+        if (w.browser) {
+            liveBrowsers.insert(w.hwnd);
+            browserWindows.append(w.hwnd);
+            rankFor(w.exe, w.created);
+            continue;
+        }
+        const Place place = appPlace(w);
+        liveApps.insert(place.key);
+        if (!m_open.contains(place.key)) {
+            OpenPlace open;
+            open.place = place;
+            open.order = rankFor(w.exe, w.created) * 1000;
+            m_open.insert(place.key, open);
+            changed = true;
+        }
+    }
+
+    for (auto it = m_pageOf.begin(); it != m_pageOf.end();) {
+        if (!IsWindow(HWND(it.key()))) {
+            m_readTitle.remove(it.key());
+            it = m_pageOf.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    QStringList closed;
+    for (auto it = m_open.begin(); it != m_open.end(); ++it) {
+        if (it.key() == kDesktopKey)
+            continue;
+        if (!it->browser) {
+            if (!liveApps.contains(it.key()) && it.key() != m_place.key)
+                closed.append(it.key());
+            continue;
+        }
+        for (auto t = it->titles.begin(); t != it->titles.end();) {
+            if (!liveBrowsers.contains(t.key()))
+                t = it->titles.erase(t);
+            else
+                ++t;
+        }
+        if (it->titles.isEmpty() && it.key() != m_place.key)
+            closed.append(it.key());
+    }
+    for (const QString &key : std::as_const(closed))
+        close(key);
+    if (changed && closed.isEmpty())
+        emit openPlacesChanged();
+
+    // The tab strip is a longer walk than the address bar, so it is read
+    // less often.
+    if (++m_pollCount % 4 == 0 && !browserWindows.isEmpty())
+        emit requestTabs(browserWindows);
+}
+
+void PlaceTracker::onTabsRead(quintptr hwnd, const QStringList &tabs, const QString &page)
+{
+    // Every browser window's active page is open, visited or not.
+    Window w;
+    if (!page.isEmpty() && describe(hwnd, &w, false) && w.browser)
+        addOpen(browserPlace(w, page), pageFromTitle(w.title));
+    if (tabs.isEmpty())
+        return;
+    QStringList closed;
+    for (auto it = m_open.begin(); it != m_open.end(); ++it) {
+        auto seen = it->titles.find(hwnd);
+        if (seen == it->titles.end())
+            continue;
+        // The page on screen is open whatever its tab is called by now.
+        if (it.key() == m_place.key && hwnd == m_place.hwnd)
+            continue;
+        bool open = false;
+        for (const QString &tab : tabs) {
+            for (const QString &title : std::as_const(*seen)) {
+                if (sameTab(tab, title)) {
+                    open = true;
+                    break;
+                }
+            }
+            if (open)
+                break;
+        }
+        if (!open) {
+            it->titles.erase(seen);
+            if (it->titles.isEmpty())
+                closed.append(it.key());
+        }
+    }
+    for (const QString &key : std::as_const(closed))
+        close(key);
+}
+
+void PlaceTracker::close(const QString &key)
+{
+    if (!m_open.remove(key))
+        return;
+    emit placeClosed(key);
+    emit openPlacesChanged();
+}
+
+QList<Place> PlaceTracker::openPlaces() const
+{
+    QList<const OpenPlace *> sorted;
+    for (const OpenPlace &open : m_open)
+        sorted.append(&open);
+    std::sort(sorted.begin(), sorted.end(), [](const OpenPlace *a, const OpenPlace *b) {
+        return a->order != b->order ? a->order < b->order : a->place.key < b->place.key;
+    });
+    QList<Place> out;
+    for (const OpenPlace *open : std::as_const(sorted))
+        out.append(open->place);
+    return out;
 }
 
 void PlaceTracker::onLocation(quintptr hwnd)
@@ -226,10 +524,10 @@ void PlaceTracker::onLocation(quintptr hwnd)
 
 void PlaceTracker::onName(quintptr hwnd)
 {
-    // A browser changes its title when the tab changes, which on this layer
-    // is the only sign the page did.
+    // A browser changes its title when the tab or the page changes, which is
+    // the cue to read its address bar again.
     if (hwnd && hwnd == m_place.hwnd && HWND(hwnd) == GetForegroundWindow())
-        resolve();
+        m_settle.start();
 }
 
 QRect PlaceTracker::anchorRect(int *dpi) const

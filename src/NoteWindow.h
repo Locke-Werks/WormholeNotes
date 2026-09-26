@@ -11,6 +11,14 @@ class RadialMenu;
 class RadialPrompt;
 class RoundEdit;
 
+// One stop on the bezel's ring of open places.
+struct RingPlace
+{
+    QString key;
+    QString label;
+    bool written = false; // has a sheet with something on it
+};
+
 struct SearchOptions
 {
     QString needle;
@@ -37,8 +45,11 @@ public:
     explicit NoteWindow(QWidget *parent = nullptr);
     ~NoteWindow() override;
 
-    // Loads a sheet. Its edits come back through textEdited.
-    void setSheet(const QString &label, const QString &text);
+    // Loads a sheet, one of count on its place. Its edits come back through
+    // textEdited. fromEnd opens it on its last page, for turning backwards.
+    void setSheet(const QString &label, const QString &text, int index, int count, bool fromEnd = false);
+    // The open places, and which one the clip is on.
+    void setRing(const QList<RingPlace> &places, int current);
     QString text() const;
     // Opens the circle centred on a point in logical screen coordinates,
     // pulled in as far as needed to stay on that screen.
@@ -56,6 +67,12 @@ Q_SIGNALS:
     void textEdited(const QString &text);
     void putAwayRequested();
     void quitRequested();
+    // The clip was turned to another place.
+    void placeTurned(const QString &key);
+    // The hub turned past this sheet's first or last page.
+    void sheetTurnRequested(int direction);
+    void newSheetRequested();
+    void deleteSheetRequested();
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -68,10 +85,11 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
     void changeEvent(QEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
 
 private:
     enum Button { MaximizeButton, CloseButton, ButtonCount };
-    enum class Zone { Outside, Face, Ring, Edge, Button, Header };
+    enum class Zone { Outside, Face, Ring, Edge, Button, Header, Clip };
     enum PromptId { FindNextId = 1, ReplaceId, ReplaceAllId, CloseId, OkId, CancelId };
 
     struct Theme
@@ -101,9 +119,17 @@ private:
     void setCircle(const QPoint &globalCenter, int radius);
     int maximumRadius() const;
 
+    // The ring of places.
+    qreal placeAngle(int index) const;
+    qreal clipAngle() const;
+    QPointF clipCenter() const;
+    int nearestPlace(qreal angle) const;
+    void turnToPlace(int index);
+
     // Painting.
     Theme theme() const;
     void drawButton(QPainter &p, Button button, const Theme &t) const;
+    void drawRing(QPainter &p, const Theme &t) const;
 
     // Chrome.
     void triggerButton(Button button);
@@ -155,6 +181,12 @@ private:
     bool m_resizing = false;
     QPointF m_resizeCenter;
     qreal m_resizeOffset = 0;
+
+    QList<RingPlace> m_ring;
+    int m_ringCurrent = 0;
+    bool m_clipDragging = false;
+    qreal m_clipDragAngle = 0;
+    int m_wheelAccum = 0;
 
     bool m_loading = false;
     bool m_choosingFont = false;

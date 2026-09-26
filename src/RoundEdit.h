@@ -54,6 +54,12 @@ public:
     int pageCount() const;
     void showPage(int page);
 
+    // Which sheet this is among its place's sheets. The hub shows it, and
+    // turning past the first or last page asks for the neighbouring sheet.
+    void setSheetMarker(int index, int count);
+    bool canTurn(int direction) const;
+    void turn(int direction);
+
     void setColors(const Colors &colors);
     // Pulls the text in from the rim, to leave room for a prompt drawn there.
     void setOuterMargin(qreal margin);
@@ -68,6 +74,8 @@ Q_SIGNALS:
     void zoomRequested(int steps);
     void filesDropped(const QStringList &paths);
     void contextMenuRequested(qreal angle);
+    // Turned past this sheet's first or last page.
+    void sheetTurnRequested(int direction);
 
 protected:
     bool event(QEvent *event) override;
@@ -108,6 +116,8 @@ private:
     Colors m_colors;
 
     int m_page = 0;
+    int m_sheetIndex = 0;
+    int m_sheetCount = 1;
     qreal m_outerMargin = 0;
 
     QBasicTimer m_blink;

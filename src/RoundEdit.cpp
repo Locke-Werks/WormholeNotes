@@ -208,6 +208,30 @@ int RoundEdit::pageCount() const
     return m_layout->pageCount();
 }
 
+void RoundEdit::setSheetMarker(int index, int count)
+{
+    m_sheetIndex = index;
+    m_sheetCount = qMax(1, count);
+    update();
+}
+
+bool RoundEdit::canTurn(int direction) const
+{
+    if (direction < 0)
+        return m_page > 0 || m_sheetIndex > 0;
+    // Past the last sheet a new one starts, unless this one is still blank.
+    return m_page < pageCount() - 1 || m_sheetIndex < m_sheetCount - 1 || !m_doc->isEmpty();
+}
+
+void RoundEdit::turn(int direction)
+{
+    const int page = m_page + direction;
+    if (page >= 0 && page < pageCount())
+        showPage(page);
+    else if (canTurn(direction))
+        Q_EMIT sheetTurnRequested(direction);
+}
+
 void RoundEdit::showPage(int page)
 {
     page = qBound(0, page, pageCount() - 1);
@@ -393,16 +417,17 @@ void RoundEdit::paintHub(QPainter &p)
     p.drawEllipse(c, r, r);
 
     const int count = pageCount();
-    if (count <= 1) {
+    if (!canTurn(-1) && !canTurn(1)) {
         p.setPen(Qt::NoPen);
         p.setBrush(m_colors.hubEdge);
         p.drawEllipse(c, r * 0.12, r * 0.12);
         return;
     }
 
-    // Each half of the hub is a button: the upper turns back, the lower on.
+    // Each half of the hub is a button: the upper turns back, the lower on,
+    // through the pages and then on to the next sheet.
     for (int part = 0; part < 2; ++part) {
-        const bool enabled = part == 0 ? m_page > 0 : m_page < count - 1;
+        const bool enabled = canTurn(part == 0 ? -1 : 1);
         if (enabled && m_hubHover == part) {
             QPainterPath half;
             half.moveTo(c);
@@ -426,8 +451,25 @@ void RoundEdit::paintHub(QPainter &p)
     font.setWeight(QFont::DemiBold);
     p.setFont(font);
     p.setPen(m_colors.hubInk);
-    p.drawText(QRectF(c.x() - r, c.y() - r / 2, 2 * r, r), Qt::AlignCenter,
-               QStringLiteral("%1/%2").arg(m_page + 1).arg(count));
+    // The sheet is the thought, so its place among the sheets is what the hub
+    // says. Pages within it get a smaller line underneath.
+    if (m_sheetCount > 1 || count <= 1) {
+        p.drawText(QRectF(c.x() - r, c.y() - r / 2, 2 * r, r), Qt::AlignCenter,
+                   QStringLiteral("%1/%2").arg(m_sheetIndex + 1).arg(m_sheetCount));
+    }
+    if (count > 1) {
+        const bool alone = m_sheetCount <= 1;
+        if (!alone) {
+            font.setPixelSize(qMax(8, qRound(r * 0.17)));
+            font.setWeight(QFont::Normal);
+            p.setFont(font);
+        }
+        const QRectF line = alone ? QRectF(c.x() - r, c.y() - r / 2, 2 * r, r)
+                                  : QRectF(c.x() - r, c.y() + r * 0.12, 2 * r, r * 0.3);
+        p.drawText(line, Qt::AlignCenter,
+                   alone ? QStringLiteral("%1/%2").arg(m_page + 1).arg(count)
+                         : tr("p. %1 of %2").arg(m_page + 1).arg(count));
+    }
 }
 
 void RoundEdit::paintEvent(QPaintEvent *)
@@ -650,7 +692,7 @@ void RoundEdit::mousePressEvent(QMouseEvent *event)
     const int part = hubPart(pos);
     if (part >= 0) {
         if (event->button() == Qt::LeftButton)
-            showPage(m_page + (part == 0 ? -1 : 1));
+            turn(part == 0 ? -1 : 1);
         return;
     }
 
@@ -697,7 +739,7 @@ void RoundEdit::mouseMoveEvent(QMouseEvent *event)
     }
 
     const int part = hubPart(pos);
-    const bool enabled = part == 0 ? m_page > 0 : (part == 1 && m_page < pageCount() - 1);
+    const bool enabled = part >= 0 && canTurn(part == 0 ? -1 : 1);
     const int hover = enabled ? part : -1;
     if (hover != m_hubHover) {
         m_hubHover = hover;

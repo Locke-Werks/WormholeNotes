@@ -17,6 +17,8 @@ set(WORMHOLENOTES_SOURCES
     src/Wormhole.h
     src/PlaceTracker.cpp
     src/PlaceTracker.h
+    src/BrowserReader.cpp
+    src/BrowserReader.h
     src/SheetStore.cpp
     src/SheetStore.h
     src/HoleWindow.cpp
@@ -60,7 +62,44 @@ else()
     target_compile_options(WormholeNotes PRIVATE -Wall -Wextra)
 endif()
 
-# dwmapi for the visible frame and cloaking of the window the hole rides on.
-target_link_libraries(WormholeNotes PRIVATE Qt6::Widgets dwmapi)
+# dwmapi for the visible frame and cloaking of the window the hole rides on,
+# ole32 and oleaut32 for UI Automation.
+target_link_libraries(WormholeNotes PRIVATE Qt6::Widgets dwmapi ole32 oleaut32)
 
 install(TARGETS WormholeNotes RUNTIME DESTINATION .)
+
+enable_testing()
+qt_add_executable(wormhole-store-test tests/store.cpp src/SheetStore.cpp src/SheetStore.h)
+target_link_libraries(wormhole-store-test PRIVATE Qt6::Core)
+add_test(NAME store COMMAND wormhole-store-test)
+
+# A console probe of place detection on the real desktop. Not installed.
+qt_add_executable(wormhole-probe
+    tests/probe.cpp
+    src/PlaceTracker.cpp
+    src/PlaceTracker.h
+    src/BrowserReader.cpp
+    src/BrowserReader.h
+)
+if(MSVC)
+    target_compile_options(wormhole-probe PRIVATE /W4 /permissive- /utf-8)
+endif()
+target_link_libraries(wormhole-probe PRIVATE Qt6::Core dwmapi ole32 oleaut32)
+
+# Renders the note offscreen to PNG, for looking at the bezel. Not installed.
+qt_add_executable(wormhole-render
+    tests/render.cpp
+    src/NoteWindow.cpp
+    src/NoteWindow.h
+    src/Arc.cpp
+    src/Arc.h
+    src/RingTextLayout.cpp
+    src/RingTextLayout.h
+    src/RoundEdit.cpp
+    src/RoundEdit.h
+    src/RadialMenu.cpp
+    src/RadialMenu.h
+    src/RadialPrompt.cpp
+    src/RadialPrompt.h
+)
+target_link_libraries(wormhole-render PRIVATE Qt6::Widgets)

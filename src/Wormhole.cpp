@@ -19,13 +19,24 @@ Wormhole::Wormhole(QObject *parent)
 
     connect(&m_tracker, &PlaceTracker::placeChanged, this, &Wormhole::onPlaceChanged);
     connect(&m_tracker, &PlaceTracker::anchorMoved, this, &Wormhole::reposition);
+    connect(&m_tracker, &PlaceTracker::placeClosed, this, &Wormhole::onPlaceClosed);
+    connect(&m_tracker, &PlaceTracker::openPlacesChanged, this, [this] {
+        if (m_note->isVisible())
+            updateRing();
+    });
     connect(m_hole, &HoleWindow::clicked, this, &Wormhole::openNote);
     connect(m_hole, &HoleWindow::dragFinished, this, &Wormhole::onHoleDragged);
     connect(m_note, &NoteWindow::putAwayRequested, this, &Wormhole::putNoteAway);
     connect(m_note, &NoteWindow::quitRequested, this, &Wormhole::quit);
+    connect(m_note, &NoteWindow::sheetTurnRequested, this, &Wormhole::turnSheet);
+    connect(m_note, &NoteWindow::newSheetRequested, this, &Wormhole::newSheet);
+    connect(m_note, &NoteWindow::deleteSheetRequested, this, &Wormhole::deleteSheet);
+    connect(m_note, &NoteWindow::placeTurned, this, &Wormhole::turnPlace);
     connect(m_note, &NoteWindow::textEdited, this, [this](const QString &text) {
-        m_store.setText(m_place.key, m_place.label, text);
-        m_hole->setFilled(!text.isEmpty());
+        const bool wasWritten = m_store.place(m_viewKey).hasWriting();
+        m_store.setSheet(m_viewKey, m_viewLabel, m_sheet, text);
+        if (wasWritten != m_store.place(m_viewKey).hasWriting())
+            updateRing();
     });
 
     m_tray = new QSystemTrayIcon(QApplication::windowIcon(), this);
@@ -57,10 +68,7 @@ void Wormhole::start()
     if (m_place.key.isEmpty()) {
         // Nothing has the foreground yet, or only something transient does.
         // The desktop is always a place, so start there.
-        Place desktop;
-        desktop.key = QStringLiteral("desktop");
-        desktop.label = tr("Desktop");
-        onPlaceChanged(desktop);
+        onPlaceChanged(m_tracker.openPlaces().constFirst());
     }
 }
 
@@ -70,10 +78,22 @@ void Wormhole::onPlaceChanged(const Place &place)
     // to another app; the open note belongs to the place they left.
     putNoteAway();
     m_place = place;
-    const Sheet sheet = m_store.sheet(place.key);
-    m_hole->setFilled(!sheet.text.isEmpty());
     m_hole->setToolTip(place.label);
+    updateHole();
     reposition();
+}
+
+void Wormhole::onPlaceClosed(const QString &key)
+{
+    if (m_note->isVisible() && key == m_viewKey)
+        return;
+    m_store.dropBlanks(key);
+    m_lastSheet.remove(key);
+}
+
+void Wormhole::updateHole()
+{
+    m_hole->setFilled(m_store.place(m_place.key).hasWriting());
 }
 
 void Wormhole::reposition()
@@ -86,7 +106,7 @@ void Wormhole::reposition()
         m_hole->hide();
         return;
     }
-    const QPointF hole = m_store.sheet(m_place.key).hole;
+    const QPointF hole = m_store.place(m_place.key).hole;
     const qreal scale = dpi / 96.0;
     // Kept on the window even when the window is smaller than it was when the
     // hole was put there.
@@ -99,19 +119,100 @@ void Wormhole::openNote()
 {
     if (m_place.key.isEmpty())
         return;
-    const Sheet sheet = m_store.sheet(m_place.key);
-    m_note->setSheet(m_place.label, sheet.text);
+    view(m_place.key, m_place.label, m_lastSheet.value(m_place.key, 0));
     // The note grows out of the hole, so it is centred where the hole is.
     const QPoint center = m_hole->isVisible() ? m_hole->geometry().center() : QCursor::pos();
     m_hole->hide();
     m_note->openAt(center);
 }
 
+void Wormhole::view(const QString &key, const QString &label, int sheet, bool fromEnd)
+{
+    m_viewKey = key;
+    m_viewLabel = label;
+    showSheet(sheet, fromEnd);
+    updateRing();
+}
+
+void Wormhole::showSheet(int index, bool fromEnd)
+{
+    const PlaceRecord record = m_store.place(m_viewKey);
+    m_sheet = qBound(0, index, int(record.sheets.size()) - 1);
+    m_lastSheet.insert(m_viewKey, m_sheet);
+    m_note->setSheet(m_viewLabel, record.sheets.at(m_sheet), m_sheet, int(record.sheets.size()), fromEnd);
+}
+
+void Wormhole::leaveSheet()
+{
+    const PlaceRecord record = m_store.place(m_viewKey);
+    if (record.sheets.size() > 1 && m_sheet < record.sheets.size() && record.sheets.at(m_sheet).trimmed().isEmpty())
+        m_store.removeSheet(m_viewKey, m_sheet);
+}
+
+void Wormhole::turnSheet(int direction)
+{
+    const int count = int(m_store.place(m_viewKey).sheets.size());
+    int target = m_sheet + direction;
+    if (target < 0)
+        return;
+    if (target >= count) {
+        newSheet();
+        return;
+    }
+    const bool leavingBlank = count > 1 && m_store.place(m_viewKey).sheets.at(m_sheet).trimmed().isEmpty();
+    leaveSheet();
+    if (leavingBlank && target > m_sheet)
+        --target;
+    showSheet(target, direction < 0);
+}
+
+void Wormhole::newSheet()
+{
+    const PlaceRecord record = m_store.place(m_viewKey);
+    // A blank last sheet already is the new sheet.
+    if (record.sheets.constLast().trimmed().isEmpty()) {
+        showSheet(int(record.sheets.size()) - 1, false);
+        return;
+    }
+    leaveSheet();
+    showSheet(m_store.addSheet(m_viewKey, m_viewLabel), false);
+}
+
+void Wormhole::deleteSheet()
+{
+    m_store.removeSheet(m_viewKey, m_sheet);
+    showSheet(qMin(m_sheet, int(m_store.place(m_viewKey).sheets.size()) - 1), false);
+    updateRing();
+}
+
+void Wormhole::turnPlace(const QString &key)
+{
+    leaveSheet();
+    QString label = key;
+    for (const Place &place : m_tracker.openPlaces()) {
+        if (place.key == key)
+            label = place.label;
+    }
+    view(key, label, m_lastSheet.value(key, 0));
+}
+
+void Wormhole::updateRing()
+{
+    QList<RingPlace> ring;
+    int current = 0;
+    for (const Place &place : m_tracker.openPlaces()) {
+        if (place.key == m_viewKey)
+            current = int(ring.size());
+        ring.append({ place.key, place.label, m_store.place(place.key).hasWriting() });
+    }
+    m_note->setRing(ring, current);
+}
+
 void Wormhole::putNoteAway()
 {
     if (!m_note->isVisible())
         return;
-    m_store.setText(m_place.key, m_place.label, m_note->text());
+    leaveSheet();
     const bool hadFocus = m_note->isActiveWindow();
     m_note->putAway();
     // Hand the foreground back to the window the note came from. Left alone,
@@ -119,6 +220,7 @@ void Wormhole::putNoteAway()
     // measured against that instead of the place they were on.
     if (hadFocus && !m_place.isDesktop() && IsWindow(HWND(m_place.hwnd)))
         SetForegroundWindow(HWND(m_place.hwnd));
+    updateHole();
     reposition();
 }
 

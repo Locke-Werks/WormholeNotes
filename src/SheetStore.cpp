@@ -11,11 +11,26 @@
 
 namespace {
 
-constexpr int kFormat = 1;
+// 1 held one text per place; 2 holds a list of sheets.
+constexpr int kFormat = 2;
 // In the title bar, left of where the caption buttons usually end.
 const QPointF kDefaultHole(170, 18);
 
+bool blank(const QString &text)
+{
+    return text.trimmed().isEmpty();
+}
+
 } // namespace
+
+bool PlaceRecord::hasWriting() const
+{
+    for (const QString &sheet : sheets) {
+        if (!blank(sheet))
+            return true;
+    }
+    return false;
+}
 
 SheetStore::SheetStore(QObject *parent)
     : QObject(parent)
@@ -46,18 +61,24 @@ void SheetStore::load()
     if (last.size() == 2)
         m_lastHole = QPointF(last.at(0).toDouble(), last.at(1).toDouble());
 
-    const QJsonObject sheets = root.value(QStringLiteral("sheets")).toObject();
-    for (auto it = sheets.begin(); it != sheets.end(); ++it) {
+    const int format = root.value(QStringLiteral("format")).toInt(1);
+    const QJsonObject places = root.value(format >= 2 ? QStringLiteral("places") : QStringLiteral("sheets")).toObject();
+    for (auto it = places.begin(); it != places.end(); ++it) {
         const QJsonObject o = it.value().toObject();
-        Sheet sheet;
-        sheet.label = o.value(QStringLiteral("label")).toString();
-        sheet.text = o.value(QStringLiteral("text")).toString();
+        PlaceRecord record;
+        record.label = o.value(QStringLiteral("label")).toString();
+        if (format >= 2) {
+            for (const QJsonValue &sheet : o.value(QStringLiteral("sheets")).toArray())
+                record.sheets.append(sheet.toString());
+        } else {
+            record.sheets.append(o.value(QStringLiteral("text")).toString());
+        }
         const QJsonArray hole = o.value(QStringLiteral("hole")).toArray();
         if (hole.size() == 2) {
-            sheet.hole = QPointF(hole.at(0).toDouble(), hole.at(1).toDouble());
-            sheet.hasHole = true;
+            record.hole = QPointF(hole.at(0).toDouble(), hole.at(1).toDouble());
+            record.hasHole = true;
         }
-        m_sheets.insert(it.key(), sheet);
+        m_places.insert(it.key(), record);
     }
 }
 
@@ -67,24 +88,29 @@ void SheetStore::flush()
     if (!m_dirty)
         return;
 
-    QJsonObject sheets;
-    for (auto it = m_sheets.cbegin(); it != m_sheets.cend(); ++it) {
-        const Sheet &sheet = it.value();
-        // A blank sheet with its hole where new places put one anyway carries
+    QJsonObject places;
+    for (auto it = m_places.cbegin(); it != m_places.cend(); ++it) {
+        const PlaceRecord &record = it.value();
+        QJsonArray sheets;
+        for (const QString &sheet : record.sheets) {
+            if (!blank(sheet))
+                sheets.append(sheet);
+        }
+        // Nothing written and the hole where new places put one anyway:
         // nothing worth keeping.
-        if (sheet.text.isEmpty() && !sheet.hasHole)
+        if (sheets.isEmpty() && !record.hasHole)
             continue;
         QJsonObject o;
-        o.insert(QStringLiteral("label"), sheet.label);
-        o.insert(QStringLiteral("text"), sheet.text);
-        if (sheet.hasHole)
-            o.insert(QStringLiteral("hole"), QJsonArray{ sheet.hole.x(), sheet.hole.y() });
-        sheets.insert(it.key(), o);
+        o.insert(QStringLiteral("label"), record.label);
+        o.insert(QStringLiteral("sheets"), sheets);
+        if (record.hasHole)
+            o.insert(QStringLiteral("hole"), QJsonArray{ record.hole.x(), record.hole.y() });
+        places.insert(it.key(), o);
     }
     QJsonObject root;
     root.insert(QStringLiteral("format"), kFormat);
     root.insert(QStringLiteral("lastHole"), QJsonArray{ m_lastHole.x(), m_lastHole.y() });
-    root.insert(QStringLiteral("sheets"), sheets);
+    root.insert(QStringLiteral("places"), places);
 
     QDir().mkpath(QFileInfo(path()).absolutePath());
     QSaveFile file(path());
@@ -95,31 +121,64 @@ void SheetStore::flush()
     }
 }
 
-Sheet SheetStore::sheet(const QString &key) const
+PlaceRecord SheetStore::place(const QString &key) const
 {
-    Sheet sheet = m_sheets.value(key);
-    if (!sheet.hasHole)
-        sheet.hole = m_lastHole;
-    return sheet;
+    PlaceRecord record = m_places.value(key);
+    if (!record.hasHole)
+        record.hole = m_lastHole;
+    if (record.sheets.isEmpty())
+        record.sheets.append(QString());
+    return record;
 }
 
-void SheetStore::setText(const QString &key, const QString &label, const QString &text)
+void SheetStore::setSheet(const QString &key, const QString &label, int index, const QString &text)
 {
-    Sheet &sheet = m_sheets[key];
-    if (sheet.text == text && sheet.label == label)
+    PlaceRecord &record = m_places[key];
+    while (record.sheets.size() <= index)
+        record.sheets.append(QString());
+    if (record.sheets.at(index) == text && record.label == label)
         return;
-    sheet.text = text;
-    sheet.label = label;
+    record.sheets[index] = text;
+    record.label = label;
+    touch();
+}
+
+int SheetStore::addSheet(const QString &key, const QString &label)
+{
+    PlaceRecord &record = m_places[key];
+    if (record.sheets.isEmpty())
+        record.sheets.append(QString());
+    record.sheets.append(QString());
+    record.label = label;
+    return int(record.sheets.size()) - 1;
+}
+
+void SheetStore::removeSheet(const QString &key, int index)
+{
+    auto it = m_places.find(key);
+    if (it == m_places.end() || index < 0 || index >= it->sheets.size())
+        return;
+    it->sheets.removeAt(index);
     touch();
 }
 
 void SheetStore::setHole(const QString &key, const QPointF &hole)
 {
-    Sheet &sheet = m_sheets[key];
-    sheet.hole = hole;
-    sheet.hasHole = true;
+    PlaceRecord &record = m_places[key];
+    record.hole = hole;
+    record.hasHole = true;
     m_lastHole = hole;
     touch();
+}
+
+void SheetStore::dropBlanks(const QString &key)
+{
+    auto it = m_places.find(key);
+    if (it == m_places.end())
+        return;
+    it->sheets.removeIf(blank);
+    if (it->sheets.isEmpty() && !it->hasHole)
+        m_places.erase(it);
 }
 
 void SheetStore::touch()
