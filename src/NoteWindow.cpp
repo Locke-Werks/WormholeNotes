@@ -1,19 +1,13 @@
 #include "NoteWindow.h"
 
-#include "Arc.h"
-#include "RadialMenu.h"
-#include "RadialPrompt.h"
-#include "RoundEdit.h"
+#include "NoteFace.h"
+#include "Round.h"
 
 #include <QAction>
-#include <QCloseEvent>
-#include <QActionGroup>
 #include <QApplication>
-#include <QDateTime>
-#include <QFontDatabase>
-#include <QFontDialog>
+#include <QCloseEvent>
 #include <QGuiApplication>
-#include <QLocale>
+#include <QKeyEvent>
 #include <QMenu>
 #include <QPainter>
 #include <QPainterPath>
@@ -21,39 +15,179 @@
 #include <QSettings>
 #include <QShortcut>
 #include <QStyleHints>
-#include <QTextBlock>
 #include <QTextDocument>
 #include <QWheelEvent>
 #include <QWindow>
 
 #include <cmath>
-#include <numbers>
 
 namespace {
 
-constexpr int kShadow = 16;
-constexpr int kEdgeGrip = 7;
-constexpr int kMinRadius = 140;
-constexpr int kDefaultRadius = 220;
-constexpr int kMinZoom = 10;
-constexpr int kMaxZoom = 500;
+constexpr int kMargin = 16; // room outside the rim for the shadow and the clip
+constexpr int kEdgeGrip = 5;
+constexpr int kMinRadius = 120;
+constexpr int kDefaultRadius = 210;
+constexpr int kMinZoom = 50;
+constexpr int kMaxZoom = 300;
 
-// Degrees around the bezel, screen convention: 0 is three o'clock, -90 noon.
-// The menu bar starts just above nine o'clock and runs clockwise toward noon;
-// the title fills the arc between it and the window buttons.
-constexpr qreal kMenuBarStart = -172;
-constexpr qreal kButtonAngle[] = { -27, -14 };
-constexpr qreal kStatusSpan = 120;
+// The pushers sit at the upper right of the rim, like a stopwatch's.
+constexpr qreal kPusherAngle[] = { -64, -49, -34 };
 
-const QColor kAccent(0xd6, 0x26, 0x2a);
+const QColor kCyan(0x2e, 0xe8, 0xff);
+const QColor kViolet(0x6b, 0x3f, 0xd6);
 
-QColor withAlpha(QColor color, int alpha)
+QColor alpha(QColor color, int a)
 {
-    color.setAlpha(alpha);
+    color.setAlpha(a);
     return color;
 }
 
 } // namespace
+
+// ---------------------------------------------------------------------------
+// The confirm band: a question written across the middle of the face, with
+// its answers as two pills. It covers the face while it is up, so nothing
+// else on the note can be touched until it is answered.
+
+class ConfirmBand : public QWidget
+{
+public:
+    explicit ConfirmBand(QWidget *parent)
+        : QWidget(parent)
+    {
+        setFocusPolicy(Qt::StrongFocus);
+        setMouseTracking(true);
+        hide();
+    }
+
+    void open(const QString &question, const QString &yes, const QString &no, std::function<void(bool)> answer,
+              bool dark)
+    {
+        m_question = question;
+        m_yes = yes;
+        m_no = no;
+        m_answer = std::move(answer);
+        m_dark = dark;
+        m_hover = -1;
+        show();
+        raise();
+        setFocus();
+        update();
+    }
+
+    void answer(bool yes)
+    {
+        if (!isVisible())
+            return;
+        hide();
+        auto callback = std::move(m_answer);
+        m_answer = nullptr;
+        if (callback)
+            callback(yes);
+    }
+
+protected:
+    QRectF band() const
+    {
+        const qreal h = height() * 0.3;
+        return QRectF(0, (height() - h) / 2, width(), h);
+    }
+
+    QRectF pill(int which) const
+    {
+        const QRectF b = band();
+        const qreal w = width() * 0.26;
+        const qreal h = b.height() * 0.3;
+        const bool single = m_no.isEmpty();
+        const qreal x = single ? (width() - w) / 2 : which == 0 ? width() / 2 - w - 6 : width() / 2 + 6;
+        return QRectF(x, b.center().y() + b.height() * 0.06, w, h);
+    }
+
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        const qreal r = width() / 2.0;
+        QPainterPath circle;
+        circle.addEllipse(QPointF(r, r), r, r);
+        p.setClipPath(circle);
+        p.fillRect(rect(), QColor(0, 0, 0, m_dark ? 110 : 60));
+        const QRectF b = band();
+        p.fillRect(b, m_dark ? QColor(0x1c, 0x19, 0x24, 245) : QColor(0xff, 0xfd, 0xf6, 248));
+        p.setPen(QPen(alpha(kViolet, 160), 1.5));
+        p.drawLine(b.topLeft(), b.topRight());
+        p.drawLine(b.bottomLeft(), b.bottomRight());
+
+        QFont font(QStringLiteral("Segoe UI Variable Text"));
+        font.setPixelSize(qMax(11, qRound(r * 0.08)));
+        p.setFont(font);
+        p.setPen(m_dark ? QColor(0xec, 0xe6, 0xf5) : QColor(0x2a, 0x24, 0x33));
+        p.drawText(QRectF(b.left(), b.top(), b.width(), b.height() * 0.5), Qt::AlignCenter, m_question);
+
+        font.setWeight(QFont::DemiBold);
+        p.setFont(font);
+        for (int i = 0; i < (m_no.isEmpty() ? 1 : 2); ++i) {
+            const QRectF box = pill(i);
+            const bool primary = i == 0;
+            QColor fill = primary ? kViolet : (m_dark ? QColor(0x3a, 0x35, 0x46) : QColor(0xec, 0xe8, 0xf4));
+            if (m_hover == i)
+                fill = fill.lighter(primary ? 120 : 106);
+            p.setPen(Qt::NoPen);
+            p.setBrush(fill);
+            p.drawRoundedRect(box, box.height() / 2, box.height() / 2);
+            p.setPen(primary ? QColor(Qt::white) : (m_dark ? QColor(0xec, 0xe6, 0xf5) : QColor(0x2a, 0x24, 0x33)));
+            p.drawText(box, Qt::AlignCenter, primary ? m_yes : m_no);
+        }
+    }
+
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        int hover = -1;
+        for (int i = 0; i < (m_no.isEmpty() ? 1 : 2); ++i) {
+            if (pill(i).contains(event->position()))
+                hover = i;
+        }
+        if (hover != m_hover) {
+            m_hover = hover;
+            setCursor(hover >= 0 ? Qt::PointingHandCursor : Qt::ArrowCursor);
+            update();
+        }
+    }
+
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        if (event->button() != Qt::LeftButton)
+            return;
+        if (pill(0).contains(event->position()))
+            answer(true);
+        else if (!m_no.isEmpty() && pill(1).contains(event->position()))
+            answer(false);
+        else if (!band().contains(event->position()))
+            answer(false);
+    }
+
+    void keyPressEvent(QKeyEvent *event) override
+    {
+        if (event->key() == Qt::Key_Escape)
+            answer(false);
+        else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
+            answer(m_no.isEmpty());
+        else if (event->key() == Qt::Key_Y || event->key() == Qt::Key_D)
+            answer(true);
+        else if (event->key() == Qt::Key_N || event->key() == Qt::Key_K)
+            answer(false);
+    }
+
+private:
+    QString m_question;
+    QString m_yes;
+    QString m_no;
+    std::function<void(bool)> m_answer;
+    bool m_dark = false;
+    int m_hover = -1;
+};
+
+// ---------------------------------------------------------------------------
 
 NoteWindow::NoteWindow(QWidget *parent)
     : QWidget(parent)
@@ -64,53 +198,61 @@ NoteWindow::NoteWindow(QWidget *parent)
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);
 
-    m_edit = new RoundEdit(this);
-    m_prompt = new RadialPrompt(this);
-    m_radial = new RadialMenu(this);
-    setFocusProxy(m_edit);
+    m_face = new NoteFace(this);
+    m_band = new ConfirmBand(this);
+    setFocusProxy(m_face);
 
-    m_flashTimer.setSingleShot(true);
-    connect(&m_flashTimer, &QTimer::timeout, this, [this] {
-        m_flash.clear();
-        update();
-    });
-
-    createActions();
-
-    QTextDocument *doc = m_edit->document();
-    connect(doc, &QTextDocument::contentsChanged, this, [this] {
-        if (!m_loading)
-            emit textEdited(text());
-    });
-    connect(doc, &QTextDocument::undoAvailable, this, &NoteWindow::updateActions);
-    connect(doc, &QTextDocument::redoAvailable, this, &NoteWindow::updateActions);
-    connect(doc, &QTextDocument::contentsChanged, this, &NoteWindow::updateActions);
-    connect(m_edit, &RoundEdit::selectionChanged, this, &NoteWindow::updateActions);
-    connect(m_edit, &RoundEdit::cursorPositionChanged, this, qOverload<>(&QWidget::update));
-    connect(m_edit, &RoundEdit::zoomRequested, this, &NoteWindow::zoomBy);
-    connect(m_edit, &RoundEdit::sheetTurnRequested, this, &NoteWindow::sheetTurnRequested);
-    connect(m_edit, &RoundEdit::contextMenuRequested, this, [this](qreal angle) {
-        m_radial->open(m_contextMenu, angle);
-    });
-    connect(m_radial, &RadialMenu::closed, this, [this] {
-        m_edit->setFocus();
-        update();
-    });
-    connect(m_prompt, &RadialPrompt::buttonClicked, this, &NoteWindow::onPromptButton);
-    connect(m_prompt, &RadialPrompt::dismissed, this, [this] {
-        m_promptMode = PromptMode::None;
-        m_edit->setOuterMargin(0);
-        m_edit->setFocus();
-    });
+    connect(m_face->document(), &QTextDocument::contentsChanged, this, [this] { emit textEdited(m_face->text()); });
+    connect(m_face, &NoteFace::sheetTurnRequested, this, &NoteWindow::sheetTurnRequested);
+    connect(m_face, &NoteFace::zoomRequested, this, &NoteWindow::zoomBy);
+    connect(m_face, &NoteFace::contextMenuRequested, this, [this](const QPoint &at) { m_menu->popup(at); });
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this] {
         applyTheme();
         update();
     });
 
+    m_menu = new QMenu(this);
+    QAction *undo = m_menu->addAction(tr("Undo\tCtrl+Z"), m_face, &NoteFace::undo);
+    QAction *redo = m_menu->addAction(tr("Redo\tCtrl+Y"), m_face, &NoteFace::redo);
+    m_menu->addSeparator();
+    QAction *cut = m_menu->addAction(tr("Cut\tCtrl+X"), m_face, &NoteFace::cut);
+    QAction *copy = m_menu->addAction(tr("Copy\tCtrl+C"), m_face, &NoteFace::copy);
+    m_menu->addAction(tr("Paste\tCtrl+V"), m_face, &NoteFace::paste);
+    QAction *remove = m_menu->addAction(tr("Delete"), m_face, &NoteFace::deleteSelection);
+    m_menu->addAction(tr("Select All\tCtrl+A"), m_face, &NoteFace::selectAll);
+    m_menu->addSeparator();
+    m_menu->addAction(tr("New Sheet\tCtrl+N"), this, [this] { pressPusher(NewPusher); });
+    m_menu->addAction(tr("Delete Sheet"), this, [this] { pressPusher(DeletePusher); });
+    m_menu->addAction(tr("Put Away\tEsc"), this, [this] { pressPusher(AwayPusher); });
+    m_menu->addSeparator();
+    m_menu->addAction(tr("About WormholeNotes"), this, &NoteWindow::about);
+    m_menu->addAction(tr("Quit WormholeNotes\tCtrl+Q"), this, &NoteWindow::quitRequested);
+    connect(m_menu, &QMenu::aboutToShow, this, [=, this] {
+        QTextDocument *doc = m_face->document();
+        const bool selection = m_face->textCursor().hasSelection();
+        undo->setEnabled(doc->isUndoAvailable());
+        redo->setEnabled(doc->isRedoAvailable());
+        cut->setEnabled(selection);
+        copy->setEnabled(selection);
+        remove->setEnabled(selection);
+    });
+
+    const auto shortcut = [this](const QKeySequence &keys, auto &&slot) {
+        connect(new QShortcut(keys, this), &QShortcut::activated, this, slot);
+    };
+    shortcut(QKeySequence::New, [this] { pressPusher(NewPusher); });
+    shortcut(QKeySequence(tr("Ctrl+Q")), [this] { emit quitRequested(); });
+    shortcut(QKeySequence::ZoomIn, [this] { zoomBy(1); });
+    shortcut(QKeySequence(tr("Ctrl+=")), [this] { zoomBy(1); });
+    shortcut(QKeySequence::ZoomOut, [this] { zoomBy(-1); });
+    shortcut(QKeySequence(tr("Ctrl+0")), [this] {
+        m_zoom = 100;
+        applyFont();
+    });
+
     loadSettings();
     applyTheme();
     applyFont();
-    updateActions();
 }
 
 NoteWindow::~NoteWindow()
@@ -120,20 +262,9 @@ NoteWindow::~NoteWindow()
 
 void NoteWindow::setSheet(const QString &label, const QString &text, int index, int count, bool fromEnd)
 {
-    m_loading = true;
-    m_edit->setPlainText(text);
-    m_edit->document()->clearUndoRedoStacks();
-    m_edit->setSheetMarker(index, count);
-    if (fromEnd) {
-        m_edit->moveCursor(QTextCursor::End);
-        m_edit->showPage(m_edit->pageCount() - 1);
-    } else {
-        m_edit->moveCursor(QTextCursor::Start);
-        m_edit->showPage(0);
-    }
-    m_loading = false;
+    m_face->setSheetMarker(index, count);
+    m_face->load(text, fromEnd);
     setWindowTitle(label);
-    updateActions();
     update();
 }
 
@@ -144,6 +275,131 @@ void NoteWindow::setRing(const QList<RingPlace> &places, int current)
     update();
 }
 
+QString NoteWindow::text() const
+{
+    return m_face->text();
+}
+
+void NoteWindow::openAt(const QPoint &globalCenter)
+{
+    const QScreen *s = QGuiApplication::screenAt(globalCenter);
+    if (!s)
+        s = QGuiApplication::primaryScreen();
+    const QRect area = s->availableGeometry();
+    m_radius = qBound(kMinRadius, m_restoreRadius, maximumRadius());
+    const int reach = m_radius + kMargin;
+    // Out of the hole, but never off the screen.
+    const QPoint c(qBound(area.left() + reach, globalCenter.x(), qMax(area.left() + reach, area.right() - reach)),
+                   qBound(area.top() + reach, globalCenter.y(), qMax(area.top() + reach, area.bottom() - reach)));
+    setCircle(c, m_radius);
+    show();
+    raise();
+    activateWindow();
+    m_face->setFocus();
+}
+
+void NoteWindow::putAway()
+{
+    if (!isVisible())
+        return;
+    m_menu->close();
+    m_band->answer(false);
+    m_restoreRadius = m_radius;
+    saveSettings();
+    hide();
+}
+
+// Switching to another app puts the note away, the way a sticky note folds
+// back when you look at something else. Checked from the event loop, since
+// focus passes through nothing on its way to the menu.
+void NoteWindow::checkStillActive()
+{
+    if (!isVisible() || m_menu->isVisible())
+        return;
+    if (!QApplication::activeWindow())
+        emit putAwayRequested();
+}
+
+// ---------------------------------------------------------------------------
+// Geometry
+
+QPointF NoteWindow::center() const
+{
+    return QPointF(width() / 2.0, height() / 2.0);
+}
+
+qreal NoteWindow::rimWidth() const
+{
+    return qBound(16.0, m_radius * 0.09, 30.0);
+}
+
+qreal NoteWindow::faceRadius() const
+{
+    return m_radius - rimWidth();
+}
+
+qreal NoteWindow::rimMid() const
+{
+    return m_radius - rimWidth() / 2;
+}
+
+qreal NoteWindow::pusherRadius() const
+{
+    return rimWidth() * 0.36;
+}
+
+QPointF NoteWindow::pusherCenter(Pusher pusher) const
+{
+    return Round::polar(center(), rimMid(), Round::radians(kPusherAngle[pusher]));
+}
+
+int NoteWindow::maximumRadius() const
+{
+    const QScreen *s = screen() ? screen() : QGuiApplication::primaryScreen();
+    const QRect area = s->availableGeometry();
+    return qMax(kMinRadius, qMin(area.width(), area.height()) / 2 - kMargin);
+}
+
+void NoteWindow::setCircle(const QPoint &globalCenter, int radius)
+{
+    m_radius = qBound(kMinRadius, radius, maximumRadius());
+    const int side = 2 * (m_radius + kMargin);
+    setGeometry(globalCenter.x() - side / 2, globalCenter.y() - side / 2, side, side);
+    update();
+}
+
+void NoteWindow::resizeEvent(QResizeEvent *)
+{
+    // The OS can resize the window too (a DPI change), so the radius follows.
+    m_radius = width() / 2 - kMargin;
+    const int side = 2 * int(std::floor(faceRadius()));
+    const QPointF c = center();
+    const QRect face(qRound(c.x() - side / 2.0), qRound(c.y() - side / 2.0), side, side);
+    m_face->setGeometry(face);
+    m_band->setGeometry(face);
+}
+
+NoteWindow::Zone NoteWindow::zoneAt(const QPointF &pos, int *index) const
+{
+    if (m_ring.size() > 1 && QLineF(clipCenter(), pos).length() <= 12)
+        return Zone::Clip;
+    const qreal d = QLineF(center(), pos).length();
+    if (d > m_radius)
+        return Zone::Outside;
+    if (d < faceRadius())
+        return Zone::Face;
+    for (int i = 0; i < PusherCount; ++i) {
+        if (QLineF(pusherCenter(Pusher(i)), pos).length() <= pusherRadius() + 2) {
+            if (index)
+                *index = i;
+            return Zone::Pusher;
+        }
+    }
+    if (d >= m_radius - kEdgeGrip)
+        return Zone::Edge;
+    return Zone::Rim;
+}
+
 // ---------------------------------------------------------------------------
 // The ring of places
 
@@ -151,7 +407,7 @@ void NoteWindow::setRing(const QList<RingPlace> &places, int current)
 qreal NoteWindow::placeAngle(int index) const
 {
     const int n = qMax(1, int(m_ring.size()));
-    return Arc::radians(-90.0 + 360.0 * index / n);
+    return Round::kNoon + 2 * 3.14159265358979 * index / n;
 }
 
 qreal NoteWindow::clipAngle() const
@@ -161,7 +417,7 @@ qreal NoteWindow::clipAngle() const
 
 QPointF NoteWindow::clipCenter() const
 {
-    return Arc::polar(center(), m_radius - 2, clipAngle());
+    return Round::polar(center(), m_radius - 2, clipAngle());
 }
 
 int NoteWindow::nearestPlace(qreal angle) const
@@ -169,8 +425,7 @@ int NoteWindow::nearestPlace(qreal angle) const
     int best = 0;
     qreal bestDistance = 10;
     for (int i = 0; i < m_ring.size(); ++i) {
-        qreal d = std::fmod(std::abs(angle - placeAngle(i)), 2 * std::numbers::pi);
-        d = qMin(d, 2 * std::numbers::pi - d);
+        const qreal d = Round::between(angle, placeAngle(i));
         if (d < bestDistance) {
             bestDistance = d;
             best = i;
@@ -183,12 +438,141 @@ void NoteWindow::turnToPlace(int index)
 {
     if (m_ring.isEmpty())
         return;
-    index = (index % int(m_ring.size()) + int(m_ring.size())) % int(m_ring.size());
+    const int n = int(m_ring.size());
+    index = (index % n + n) % n;
     if (index == m_ringCurrent)
         return;
     m_ringCurrent = index;
     update();
     emit placeTurned(m_ring.at(index).key);
+}
+
+// ---------------------------------------------------------------------------
+// Painting
+
+NoteWindow::Theme NoteWindow::theme() const
+{
+    Theme t;
+    t.dark = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
+    if (t.dark) {
+        t.rimTop = QColor(0x58, 0x3f, 0xb8);
+        t.rimBottom = QColor(0x22, 0x17, 0x5c);
+    } else {
+        t.rimTop = QColor(0x7d, 0x5c, 0xe8);
+        t.rimBottom = QColor(0x3b, 0x28, 0x91);
+    }
+    t.rimInk = QColor(0xfb, 0xf8, 0xff);
+    t.rimDim = QColor(0xfb, 0xf8, 0xff, 175);
+    t.lip = alpha(kCyan, t.dark ? 150 : 190);
+    if (!isActiveWindow()) {
+        t.rimTop = t.rimTop.darker(118);
+        t.rimBottom = t.rimBottom.darker(118);
+    }
+    return t;
+}
+
+void NoteWindow::applyTheme()
+{
+    const bool dark = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
+    NoteFace::Colors c;
+    if (dark) {
+        c.paper = QColor(0x2b, 0x27, 0x33);
+        c.paperEdge = QColor(0x21, 0x1e, 0x28);
+        c.ink = QColor(0xec, 0xe6, 0xf5);
+        c.rule = QColor(255, 255, 255, 20);
+        c.selection = alpha(kCyan, 70);
+        c.caret = kCyan;
+        c.control = QColor(0xec, 0xe6, 0xf5, 170);
+    } else {
+        c.paper = QColor(0xff, 0xf7, 0xdf);
+        c.paperEdge = QColor(0xf0, 0xe4, 0xc0);
+        c.ink = QColor(0x2a, 0x24, 0x33);
+        c.rule = QColor(0x3c, 0x50, 0xa0, 30);
+        c.selection = alpha(kCyan, 95);
+        c.caret = kViolet;
+        c.control = QColor(0x2a, 0x24, 0x33, 170);
+    }
+    c.controlHot = alpha(kViolet, 45);
+    m_face->setColors(c);
+}
+
+void NoteWindow::paintEvent(QPaintEvent *)
+{
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+    const Theme t = theme();
+    const QPointF c = center();
+    const qreal r = m_radius;
+
+    // A soft shadow, since a frameless window gets none of its own.
+    QRadialGradient shadow(c + QPointF(0, 4), r + kMargin - 2);
+    const qreal edge = r / (r + kMargin - 2);
+    shadow.setColorAt(0, QColor(0, 0, 0, 70));
+    shadow.setColorAt(edge, QColor(0, 0, 0, 70));
+    shadow.setColorAt(1, QColor(0, 0, 0, 0));
+    p.setPen(Qt::NoPen);
+    p.setBrush(shadow);
+    p.drawEllipse(c + QPointF(0, 4), r + kMargin - 2, r + kMargin - 2);
+
+    // The rim, lit from above.
+    QLinearGradient rim(c.x(), c.y() - r, c.x(), c.y() + r);
+    rim.setColorAt(0, t.rimTop);
+    rim.setColorAt(1, t.rimBottom);
+    p.setBrush(rim);
+    p.drawEllipse(c, r, r);
+
+    // Where the rim meets the paper, a thin line of the wormhole's glow.
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(t.lip, 1.4));
+    p.drawEllipse(c, faceRadius() + 0.7, faceRadius() + 0.7);
+
+    // The place's name across the top of the rim, or the place the clip is
+    // being dragged to.
+    QFont font(QStringLiteral("Segoe UI Variable Text"));
+    font.setPixelSize(qMax(9, qRound(rimWidth() * 0.5)));
+    font.setWeight(QFont::DemiBold);
+    const QString name = m_clipDragging ? m_clipHint : windowTitle();
+    // Centred left of noon, so it ends before the pushers begin.
+    const qreal span = Round::radians(78);
+    Round::arcText(p, c, rimMid(), Round::kNoon - Round::radians(22),
+                   Round::fitArc(name, font, rimMid(), span), font, m_clipDragging ? t.rimInk : t.rimDim);
+
+    for (int i = 0; i < PusherCount; ++i)
+        drawPusher(p, Pusher(i), t);
+    drawRing(p, t);
+}
+
+void NoteWindow::drawPusher(QPainter &p, Pusher pusher, const Theme &t) const
+{
+    const QPointF pc = pusherCenter(pusher);
+    const qreal pr = pusherRadius();
+    const bool hot = m_hoverPusher == pusher;
+    const bool down = hot && m_pressedPusher == pusher;
+
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(255, 255, 255, down ? 90 : hot ? 55 : 22));
+    p.drawEllipse(pc, pr, pr);
+
+    const qreal s = pr * 0.5;
+    p.setPen(QPen(t.rimInk, qMax(1.3, pr * 0.16), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setBrush(Qt::NoBrush);
+    switch (pusher) {
+    case NewPusher:
+        p.drawLine(pc + QPointF(-s, 0), pc + QPointF(s, 0));
+        p.drawLine(pc + QPointF(0, -s), pc + QPointF(0, s));
+        break;
+    case DeletePusher:
+        p.drawLine(pc + QPointF(-s, 0), pc + QPointF(s, 0));
+        break;
+    case AwayPusher:
+        // A small circle shrinking into the hole it came from.
+        p.drawEllipse(pc, s * 0.8, s * 0.8);
+        p.setBrush(t.rimInk);
+        p.drawEllipse(pc, s * 0.25, s * 0.25);
+        break;
+    case PusherCount:
+        break;
+    }
 }
 
 void NoteWindow::drawRing(QPainter &p, const Theme &t) const
@@ -199,9 +583,9 @@ void NoteWindow::drawRing(QPainter &p, const Theme &t) const
 
     // A notch on the rim for every open place, bright where there is writing.
     for (int i = 0; i < m_ring.size(); ++i) {
-        const QPointF at = Arc::polar(c, m_radius - 3.5, placeAngle(i));
+        const QPointF at = Round::polar(c, m_radius - 3, placeAngle(i));
         p.setPen(Qt::NoPen);
-        p.setBrush(m_ring.at(i).written ? t.ringInk : t.ringDim);
+        p.setBrush(m_ring.at(i).written ? kCyan : t.rimDim);
         const qreal dot = m_ring.at(i).written ? 2.2 : 1.5;
         p.drawEllipse(at, dot, dot);
     }
@@ -210,8 +594,9 @@ void NoteWindow::drawRing(QPainter &p, const Theme &t) const
     // the radius: local -y points out from the centre.
     const qreal a = clipAngle();
     p.save();
-    p.translate(Arc::polar(c, m_radius, a));
-    p.rotate(Arc::degrees(a) + 90);
+    p.translate(Round::polar(c, m_radius, a));
+    p.rotate(Round::degrees(a) + 90);
+
     // The wire handles, folded back out past the rim, behind the body.
     const QColor steel(0xd4, 0xd8, 0xe0);
     p.setBrush(Qt::NoBrush);
@@ -243,399 +628,43 @@ void NoteWindow::drawRing(QPainter &p, const Theme &t) const
     p.restore();
 }
 
-QString NoteWindow::text() const
-{
-    return m_edit->exactText();
-}
-
-void NoteWindow::openAt(const QPoint &globalCenter)
-{
-    m_maximized = false;
-    const QScreen *s = QGuiApplication::screenAt(globalCenter);
-    if (!s)
-        s = QGuiApplication::primaryScreen();
-    const QRect area = s->availableGeometry();
-    m_radius = qBound(kMinRadius, m_restoreRadius, maximumRadius());
-    const int reach = m_radius + kShadow;
-    // Out of the hole, but never off the screen.
-    const QPoint c(qBound(area.left() + reach, globalCenter.x(), qMax(area.left() + reach, area.right() - reach)),
-                   qBound(area.top() + reach, globalCenter.y(), qMax(area.top() + reach, area.bottom() - reach)));
-    setCircle(c, m_radius);
-    show();
-    raise();
-    activateWindow();
-    m_edit->setFocus();
-}
-
-void NoteWindow::putAway()
-{
-    if (!isVisible())
-        return;
-    m_radial->close();
-    m_prompt->dismiss();
-    if (!m_maximized)
-        m_restoreRadius = m_radius;
-    saveSettings();
-    hide();
-}
-
-// Switching to another app puts the note away, the way a sticky note folds
-// back when you look at something else. Checked from the event loop, since
-// focus passes through nothing on its way to one of our own dialogs.
-void NoteWindow::checkStillActive()
-{
-    if (!isVisible() || m_choosingFont || modalOpen())
-        return;
-    if (!QApplication::activeWindow())
-        emit putAwayRequested();
-}
-
 // ---------------------------------------------------------------------------
-// Geometry
-
-QPointF NoteWindow::center() const
-{
-    return QPointF(width() / 2.0, height() / 2.0);
-}
-
-int NoteWindow::ringWidth() const
-{
-    return qBound(28, qRound(m_radius * 0.115), 44);
-}
-
-qreal NoteWindow::innerRadius() const
-{
-    return m_radius - ringWidth();
-}
-
-qreal NoteWindow::ringMid() const
-{
-    return m_radius - ringWidth() / 2.0;
-}
-
-qreal NoteWindow::buttonRadius() const
-{
-    return ringWidth() * 0.34;
-}
-
-QPointF NoteWindow::buttonCenter(Button button) const
-{
-    return Arc::polar(center(), ringMid(), Arc::radians(kButtonAngle[button]));
-}
-
-QFont NoteWindow::bezelFont(qreal scale, bool bold) const
-{
-    QFont font(QStringLiteral("Segoe UI Variable Text"));
-    font.setPixelSize(qMax(9, qRound(ringWidth() * scale)));
-    if (bold)
-        font.setWeight(QFont::DemiBold);
-    return font;
-}
-
-QList<NoteWindow::Header> NoteWindow::headers() const
-{
-    QList<Header> out;
-    const QFontMetricsF metrics(bezelFont(0.38, true));
-    const qreal mid = ringMid();
-    qreal angle = Arc::radians(kMenuBarStart);
-    for (QMenu *menu : m_menus) {
-        Header header;
-        header.menu = menu;
-        header.label = Arc::stripMnemonic(menu->title());
-        header.from = angle;
-        header.sweep = (Arc::advance(metrics, header.label) + 18) / mid;
-        angle += header.sweep + 2 / mid;
-        out.append(header);
-    }
-    return out;
-}
-
-NoteWindow::Zone NoteWindow::zoneAt(const QPointF &pos, int *index) const
-{
-    const qreal d = QLineF(center(), pos).length();
-    if (m_ring.size() > 1 && QLineF(clipCenter(), pos).length() <= 12)
-        return Zone::Clip;
-    if (d > m_radius)
-        return Zone::Outside;
-    if (d < innerRadius())
-        return Zone::Face;
-    for (int b = 0; b < ButtonCount; ++b) {
-        if (QLineF(buttonCenter(Button(b)), pos).length() <= buttonRadius() + 2) {
-            if (index)
-                *index = b;
-            return Zone::Button;
-        }
-    }
-    if (d >= m_radius - kEdgeGrip)
-        return Zone::Edge;
-    const qreal angle = Arc::angleOf(center(), pos);
-    const QList<Header> list = headers();
-    for (int h = 0; h < list.size(); ++h) {
-        if (Arc::within(angle, list.at(h).from, list.at(h).sweep)) {
-            if (index)
-                *index = h;
-            return Zone::Header;
-        }
-    }
-    return Zone::Ring;
-}
-
-int NoteWindow::maximumRadius() const
-{
-    const QScreen *s = screen() ? screen() : QGuiApplication::primaryScreen();
-    const QRect area = s->availableGeometry();
-    return qMax(kMinRadius, qMin(area.width(), area.height()) / 2 - kShadow);
-}
-
-void NoteWindow::setCircle(const QPoint &globalCenter, int radius)
-{
-    m_radius = qBound(kMinRadius, radius, maximumRadius());
-    const int side = 2 * (m_radius + kShadow);
-    setGeometry(globalCenter.x() - side / 2, globalCenter.y() - side / 2, side, side);
-    update();
-}
-
-void NoteWindow::resizeEvent(QResizeEvent *)
-{
-    // The OS can resize us too (a DPI change), so the radius follows the size.
-    m_radius = width() / 2 - kShadow;
-    const qreal inner = innerRadius();
-    const int side = 2 * int(std::floor(inner));
-    const QPointF c = center();
-    m_edit->setGeometry(qRound(c.x() - side / 2.0), qRound(c.y() - side / 2.0), side, side);
-    m_radial->setGeometry(rect());
-    m_radial->setDisc(c, inner);
-    m_prompt->setGeometry(rect());
-    m_prompt->setDisc(c, inner);
-    if (m_promptMode != PromptMode::None)
-        m_edit->setOuterMargin(m_prompt->depth());
-}
-
-// ---------------------------------------------------------------------------
-// Painting
-
-NoteWindow::Theme NoteWindow::theme() const
-{
-    Theme t;
-    t.dark = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
-    if (t.dark) {
-        t.face = QColor(0x1f, 0x1d, 0x1c);
-        t.faceEdge = QColor(0x16, 0x15, 0x14);
-        t.ink = QColor(0xec, 0xe7, 0xde);
-        t.ringTop = QColor(0xb8, 0x25, 0x2a);
-        t.ringBottom = QColor(0x6c, 0x13, 0x17);
-        t.ringInk = QColor(0xfd, 0xee, 0xea);
-        t.ringDim = QColor(0xfd, 0xee, 0xea, 165);
-        t.selection = QColor(0xd6, 0x26, 0x2a, 120);
-        t.band = QColor(0x2b, 0x28, 0x26, 246);
-        t.bandEdge = QColor(255, 255, 255, 34);
-        t.field = QColor(0x14, 0x13, 0x12);
-    } else {
-        t.face = QColor(0xfb, 0xf8, 0xf1);
-        t.faceEdge = QColor(0xec, 0xe5, 0xd6);
-        t.ink = QColor(0x1f, 0x1c, 0x19);
-        t.ringTop = QColor(0xe2, 0x36, 0x3b);
-        t.ringBottom = QColor(0xa4, 0x1b, 0x20);
-        t.ringInk = QColor(0xff, 0xf7, 0xf4);
-        t.ringDim = QColor(0xff, 0xf7, 0xf4, 180);
-        t.selection = QColor(0xd6, 0x26, 0x2a, 70);
-        t.band = QColor(0xff, 0xfd, 0xf8, 248);
-        t.bandEdge = QColor(0, 0, 0, 38);
-        t.field = QColor(0xff, 0xff, 0xff);
-    }
-    if (!isActiveWindow()) {
-        t.ringTop = t.ringTop.darker(125);
-        t.ringBottom = t.ringBottom.darker(125);
-    }
-    return t;
-}
-
-void NoteWindow::paintEvent(QPaintEvent *)
-{
-    QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing);
-    p.setRenderHint(QPainter::TextAntialiasing);
-
-    const Theme t = theme();
-    const QPointF c = center();
-    const qreal r = m_radius;
-    const qreal inner = innerRadius();
-
-    // Soft drop shadow, since a frameless window gets none from DWM.
-    {
-        const QPointF sc = c + QPointF(0, 3);
-        const qreal sr = r + kShadow - 3;
-        const qreal edge = (r - 4) / sr;
-        QRadialGradient g(sc, sr);
-        g.setColorAt(0, QColor(0, 0, 0, 80));
-        g.setColorAt(edge, QColor(0, 0, 0, 80));
-        g.setColorAt((edge + 1) / 2, QColor(0, 0, 0, 22));
-        g.setColorAt(1, QColor(0, 0, 0, 0));
-        p.setPen(Qt::NoPen);
-        p.setBrush(g);
-        p.drawEllipse(sc, sr, sr);
-    }
-
-    // Bezel.
-    QLinearGradient bezel(c.x(), c.y() - r, c.x(), c.y() + r);
-    bezel.setColorAt(0, t.ringTop);
-    bezel.setColorAt(1, t.ringBottom);
-    p.setBrush(bezel);
-    p.drawEllipse(c, r, r);
-
-    QLinearGradient shine(c.x(), c.y() - r, c.x(), c.y() + r);
-    shine.setColorAt(0, QColor(255, 255, 255, 110));
-    shine.setColorAt(0.5, QColor(255, 255, 255, 0));
-    shine.setColorAt(1, QColor(0, 0, 0, 60));
-    p.setBrush(Qt::NoBrush);
-    p.setPen(QPen(QBrush(shine), 1.4));
-    p.drawEllipse(c, r - 0.9, r - 0.9);
-
-    // Face.
-    QRadialGradient face(c, inner);
-    face.setColorAt(0, t.face);
-    face.setColorAt(0.86, t.face);
-    face.setColorAt(1, t.faceEdge);
-    p.setPen(Qt::NoPen);
-    p.setBrush(face);
-    p.drawEllipse(c, inner, inner);
-
-    QLinearGradient lip(c.x(), c.y() - inner, c.x(), c.y() + inner);
-    lip.setColorAt(0, QColor(0, 0, 0, 90));
-    lip.setColorAt(1, QColor(255, 255, 255, 60));
-    p.setBrush(Qt::NoBrush);
-    p.setPen(QPen(QBrush(lip), 1.6));
-    p.drawEllipse(c, inner + 0.6, inner + 0.6);
-
-    // The menu bar: each title a segment of the bezel, lit while hovered or open.
-    const qreal mid = ringMid();
-    const QFont headerFont = bezelFont(0.38, true);
-    const QList<Header> list = headers();
-    QMenu *open = m_radial->isOpen() ? m_radial->rootMenu() : nullptr;
-    for (int h = 0; h < list.size(); ++h) {
-        const Header &header = list.at(h);
-        const bool lit = header.menu == open || h == m_hoverHeader;
-        if (lit) {
-            const QPainterPath path = Arc::sector(c, inner + 3, r - 3, header.from, header.sweep);
-            p.fillPath(path, QColor(255, 255, 255, header.menu == open ? 70 : 38));
-        }
-        Arc::drawCentered(p, c, mid, header.from + header.sweep / 2, header.label, headerFont, t.ringInk, 0.3);
-    }
-
-    // Title, in the arc between the menu bar and the buttons.
-    if (!list.isEmpty()) {
-        const qreal from = list.last().from + list.last().sweep + Arc::radians(4);
-        const qreal to = Arc::radians(kButtonAngle[MaximizeButton]) - buttonRadius() / mid - Arc::radians(3);
-        if (to > from) {
-            const QFont titleFont = bezelFont(0.38, false);
-            const QString title = Arc::elide(QFontMetricsF(titleFont), windowTitle(), (to - from) * mid);
-            Arc::drawCentered(p, c, mid, (from + to) / 2, title, titleFont, t.ringDim, 0.3);
-        }
-    }
-
-    // Status along the bottom arc, upright.
-    if (m_statusVisible) {
-        const QFont statusFont = bezelFont(0.34, false);
-        const QString status = Arc::elide(QFontMetricsF(statusFont), statusText(),
-                                          Arc::radians(kStatusSpan) * mid);
-        Arc::drawCentered(p, c, mid, Arc::kSix, status, statusFont, m_flash.isEmpty() ? t.ringDim : t.ringInk,
-                          0.3);
-    }
-
-    for (int b = 0; b < ButtonCount; ++b)
-        drawButton(p, Button(b), t);
-
-    drawRing(p, t);
-}
-
-void NoteWindow::drawButton(QPainter &p, Button button, const Theme &t) const
-{
-    const QPointF bc = buttonCenter(button);
-    const qreal br = buttonRadius();
-    const bool hot = m_hoverButton == button;
-    const bool down = hot && m_pressed == button;
-
-    QColor glyph = t.ringInk;
-    if (hot) {
-        QColor fill = QColor(255, 255, 255, down ? 95 : 55);
-        if (button == CloseButton) {
-            fill = QColor(255, 255, 255, down ? 200 : 235);
-            glyph = kAccent;
-        }
-        p.setPen(Qt::NoPen);
-        p.setBrush(fill);
-        p.drawEllipse(bc, br, br);
-    }
-
-    p.setPen(QPen(glyph, qMax(1.4, br * 0.14), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    p.setBrush(Qt::NoBrush);
-    const qreal s = br * 0.42;
-
-    // Glyphs are turned to the radius, so they sit square to the bezel.
-    p.save();
-    p.translate(bc);
-    p.rotate(kButtonAngle[button] + 90);
-    switch (button) {
-    case MaximizeButton:
-        // A round window maximizes to a bigger circle, so the glyph is one.
-        p.drawEllipse(QPointF(0, 0), m_maximized ? s * 0.5 : s * 0.9, m_maximized ? s * 0.5 : s * 0.9);
-        break;
-    case CloseButton:
-        p.drawLine(QPointF(-s * 0.85, -s * 0.85), QPointF(s * 0.85, s * 0.85));
-        p.drawLine(QPointF(-s * 0.85, s * 0.85), QPointF(s * 0.85, -s * 0.85));
-        break;
-    case ButtonCount:
-        break;
-    }
-    p.restore();
-}
-
-// ---------------------------------------------------------------------------
-// Mouse and keyboard on the chrome
+// Mouse and keyboard on the rim
 
 void NoteWindow::mousePressEvent(QMouseEvent *event)
 {
     int index = -1;
     const Zone zone = zoneAt(event->position(), &index);
-
-    if (event->button() == Qt::LeftButton) {
-        switch (zone) {
-        case Zone::Button:
-            m_pressed = index;
-            update();
-            return;
-        case Zone::Header:
-            openMenu(index, false);
-            return;
-        case Zone::Clip:
-            m_radial->close();
-            m_clipDragging = true;
-            m_clipDragAngle = Arc::angleOf(center(), event->position());
-            update();
-            return;
-        case Zone::Edge:
-            m_radial->close();
-            m_resizing = true;
-            m_maximized = false;
-            m_resizeCenter = mapToGlobal(center());
-            m_resizeOffset = m_radius - QLineF(m_resizeCenter, event->globalPosition()).length();
-            return;
-        case Zone::Ring:
-            m_radial->close();
-            m_maximized = false;
-            if (windowHandle())
-                windowHandle()->startSystemMove();
-            return;
-        case Zone::Face:
-        case Zone::Outside:
-            break;
-        }
-    } else if (event->button() == Qt::RightButton && zone != Zone::Face && zone != Zone::Outside) {
-        if (modalOpen())
-            return;
-        m_radial->open(m_rootMenu, Arc::angleOf(center(), event->position()));
+    if (event->button() == Qt::RightButton && zone != Zone::Outside) {
+        m_menu->popup(event->globalPosition().toPoint());
+        return;
+    }
+    if (event->button() != Qt::LeftButton)
+        return;
+    switch (zone) {
+    case Zone::Pusher:
+        m_pressedPusher = index;
         update();
         return;
+    case Zone::Clip:
+        m_clipDragging = true;
+        m_clipDragAngle = Round::angleOf(center(), event->position());
+        m_clipHint = m_ring.at(nearestPlace(m_clipDragAngle)).label;
+        setCursor(Qt::ClosedHandCursor);
+        update();
+        return;
+    case Zone::Edge:
+        m_resizing = true;
+        m_resizeCenter = mapToGlobal(center());
+        m_resizeOffset = m_radius - QLineF(m_resizeCenter, event->globalPosition()).length();
+        return;
+    case Zone::Rim:
+        if (windowHandle())
+            windowHandle()->startSystemMove();
+        return;
+    case Zone::Face:
+    case Zone::Outside:
+        break;
     }
     QWidget::mousePressEvent(event);
 }
@@ -648,39 +677,40 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
         return;
     }
     if (m_clipDragging) {
-        m_clipDragAngle = Arc::angleOf(center(), event->position());
-        m_flash = m_ring.at(nearestPlace(m_clipDragAngle)).label;
+        m_clipDragAngle = Round::angleOf(center(), event->position());
+        m_clipHint = m_ring.at(nearestPlace(m_clipDragAngle)).label;
         update();
         return;
     }
 
     int index = -1;
     const Zone zone = zoneAt(event->position(), &index);
-    const int button = zone == Zone::Button ? index : -1;
-    const int header = zone == Zone::Header ? index : -1;
-    if (button != m_hoverButton || header != m_hoverHeader) {
-        m_hoverButton = button;
-        m_hoverHeader = header;
+    const int pusher = zone == Zone::Pusher ? index : -1;
+    if (pusher != m_hoverPusher) {
+        m_hoverPusher = pusher;
         update();
     }
-
     if (zone == Zone::Edge) {
         const QPointF v = event->position() - center();
-        const qreal a = std::fmod(Arc::degrees(std::atan2(v.y(), v.x())) + 360.0, 180.0);
-        if (a < 22.5 || a >= 157.5)
-            setCursor(Qt::SizeHorCursor);
-        else if (a < 67.5)
-            setCursor(Qt::SizeFDiagCursor);
-        else if (a < 112.5)
-            setCursor(Qt::SizeVerCursor);
-        else
-            setCursor(Qt::SizeBDiagCursor);
+        const qreal a = std::fmod(Round::degrees(std::atan2(v.y(), v.x())) + 360.0, 180.0);
+        setCursor(a < 22.5 || a >= 157.5 ? Qt::SizeHorCursor
+                  : a < 67.5             ? Qt::SizeFDiagCursor
+                  : a < 112.5            ? Qt::SizeVerCursor
+                                         : Qt::SizeBDiagCursor);
     } else if (zone == Zone::Clip) {
         setCursor(Qt::OpenHandCursor);
-    } else if (zone == Zone::Button || zone == Zone::Header) {
+    } else if (zone == Zone::Pusher) {
         setCursor(Qt::PointingHandCursor);
     } else {
         unsetCursor();
+    }
+    if (zone == Zone::Pusher) {
+        static const char *const tips[] = { "New sheet", "Delete this sheet", "Put away" };
+        setToolTip(tr(tips[index]));
+    } else if (zone == Zone::Clip && !m_ring.isEmpty()) {
+        setToolTip(tr("Turn to another place"));
+    } else {
+        setToolTip(QString());
     }
 }
 
@@ -692,34 +722,33 @@ void NoteWindow::mouseReleaseEvent(QMouseEvent *event)
     }
     if (m_clipDragging) {
         m_clipDragging = false;
-        m_flash.clear();
-        const int nearest = nearestPlace(Arc::angleOf(center(), event->position()));
+        unsetCursor();
+        const int nearest = nearestPlace(Round::angleOf(center(), event->position()));
         update();
         turnToPlace(nearest);
         return;
     }
-    if (m_pressed >= 0) {
-        const int pressed = m_pressed;
-        m_pressed = -1;
+    if (m_pressedPusher >= 0) {
+        const int pressed = m_pressedPusher;
+        m_pressedPusher = -1;
         update();
         int index = -1;
-        if (zoneAt(event->position(), &index) == Zone::Button && index == pressed)
-            triggerButton(Button(index));
+        if (zoneAt(event->position(), &index) == Zone::Pusher && index == pressed)
+            pressPusher(Pusher(index));
         return;
     }
     QWidget::mouseReleaseEvent(event);
 }
 
-void NoteWindow::mouseDoubleClickEvent(QMouseEvent *event)
+void NoteWindow::leaveEvent(QEvent *)
 {
-    if (event->button() == Qt::LeftButton && zoneAt(event->position()) == Zone::Ring) {
-        toggleMaximize();
-        return;
+    if (m_hoverPusher != -1) {
+        m_hoverPusher = -1;
+        update();
     }
-    QWidget::mouseDoubleClickEvent(event);
 }
 
-// The wheel over the bezel turns the clip, one place per notch.
+// The wheel over the rim turns the clip, one place per notch.
 void NoteWindow::wheelEvent(QWheelEvent *event)
 {
     const Zone zone = zoneAt(event->position());
@@ -728,97 +757,33 @@ void NoteWindow::wheelEvent(QWheelEvent *event)
         return;
     }
     const int delta = event->angleDelta().y();
-    if ((delta > 0) != (m_wheelAccum > 0))
-        m_wheelAccum = 0;
-    m_wheelAccum += delta;
+    if ((delta > 0) != (m_wheel > 0))
+        m_wheel = 0;
+    m_wheel += delta;
     int steps = 0;
-    while (m_wheelAccum >= 120) {
-        m_wheelAccum -= 120;
+    for (; m_wheel >= 120; m_wheel -= 120)
         --steps;
-    }
-    while (m_wheelAccum <= -120) {
-        m_wheelAccum += 120;
+    for (; m_wheel <= -120; m_wheel += 120)
         ++steps;
-    }
     if (steps != 0)
         turnToPlace(m_ringCurrent + steps);
     event->accept();
 }
 
-void NoteWindow::leaveEvent(QEvent *)
-{
-    if (m_hoverButton != -1 || m_hoverHeader != -1) {
-        m_hoverButton = -1;
-        m_hoverHeader = -1;
-        update();
-    }
-}
-
 void NoteWindow::keyPressEvent(QKeyEvent *event)
 {
-    // Escape in the text closes a Find or Replace ring left open beside it.
     if (event->key() == Qt::Key_Escape) {
-        if (m_prompt->isOpen())
-            m_prompt->dismiss();
-        else if (m_radial->isOpen())
-            m_radial->close();
-        else
-            emit putAwayRequested();
+        emit putAwayRequested();
         return;
     }
     QWidget::keyPressEvent(event);
 }
 
-void NoteWindow::openMenu(int header, bool fromKeyboard)
-{
-    const QList<Header> list = headers();
-    if (header < 0 || header >= list.size() || modalOpen())
-        return;
-    const Header &h = list.at(header);
-    if (!fromKeyboard && m_radial->isOpen() && m_radial->rootMenu() == h.menu) {
-        m_radial->close();
-        return;
-    }
-    m_radial->open(h.menu, h.from + h.sweep / 2, fromKeyboard);
-    update();
-}
-
-void NoteWindow::triggerButton(Button button)
-{
-    switch (button) {
-    case MaximizeButton: toggleMaximize(); break;
-    case CloseButton: emit putAwayRequested(); break;
-    case ButtonCount: break;
-    }
-}
-
-void NoteWindow::toggleMaximize()
-{
-    if (m_maximized) {
-        m_maximized = false;
-        setCircle(m_restoreCenter, m_restoreRadius);
-    } else {
-        m_restoreCenter = mapToGlobal(center()).toPoint();
-        m_restoreRadius = m_radius;
-        m_maximized = true;
-        const QScreen *s = screen() ? screen() : QGuiApplication::primaryScreen();
-        setCircle(s->availableGeometry().center(), maximumRadius());
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Window events
-
 void NoteWindow::closeEvent(QCloseEvent *event)
 {
-    // Alt+F4 puts the note away. Quitting is on the Note menu and the tray.
+    // Alt+F4 puts the note away. Quitting is on the menu and the tray.
     event->ignore();
     emit putAwayRequested();
-}
-
-bool NoteWindow::modalOpen() const
-{
-    return m_prompt->isOpen() && m_prompt->isModal();
 }
 
 void NoteWindow::changeEvent(QEvent *event)
@@ -832,509 +797,82 @@ void NoteWindow::changeEvent(QEvent *event)
 }
 
 // ---------------------------------------------------------------------------
-// Menus and actions
+// Commands
 
-void NoteWindow::createActions()
+void NoteWindow::pressPusher(Pusher pusher)
 {
-    auto add = [this](QMenu *menu, const QString &text, const QList<QKeySequence> &keys, auto &&slot) {
-        QAction *action = menu->addAction(text);
-        action->setShortcuts(keys);
-        connect(action, &QAction::triggered, this, slot);
-        // On the window too, so the shortcut works with no menu open. The
-        // menus are never shown as QMenus; RadialMenu draws them.
-        addAction(action);
-        return action;
-    };
+    if (asking())
+        return;
+    switch (pusher) {
+    case NewPusher:
+        emit newSheetRequested();
+        break;
+    case DeletePusher:
+        confirmDelete();
+        break;
+    case AwayPusher:
+        emit putAwayRequested();
+        break;
+    case PusherCount:
+        break;
+    }
+}
 
-    QMenu *note = new QMenu(tr("&Note"), this);
-    add(note, tr("&New Sheet"), { QKeySequence::New }, [this] { emit newSheetRequested(); });
-    add(note, tr("&Delete Sheet"), {}, [this] {
-        if (!m_edit->document()->isEmpty()) {
-            const int answer = ask({ tr("Delete this sheet?") },
-                                   { { tr("Delete"), OkId }, { tr("Cancel"), CancelId } }, CancelId, CancelId);
-            if (answer != OkId)
-                return;
-        }
+void NoteWindow::confirmDelete()
+{
+    if (m_face->document()->isEmpty()) {
         emit deleteSheetRequested();
+        return;
+    }
+    ask(tr("Delete this sheet?"), tr("Delete"), tr("Keep"), [this](bool yes) {
+        m_face->setFocus();
+        if (yes)
+            emit deleteSheetRequested();
     });
-    note->addSeparator();
-    add(note, tr("&Put Away"), {}, [this] { emit putAwayRequested(); });
-    note->addSeparator();
-    add(note, tr("&Quit WormholeNotes"), { QKeySequence(tr("Ctrl+Q")) }, [this] { emit quitRequested(); });
-
-    QMenu *edit = new QMenu(tr("&Edit"), this);
-    m_undo = add(edit, tr("&Undo"), { QKeySequence::Undo }, [this] { m_edit->undo(); });
-    m_redo = add(edit, tr("&Redo"), { QKeySequence(tr("Ctrl+Y")) }, [this] { m_edit->redo(); });
-    edit->addSeparator();
-    m_cut = add(edit, tr("Cu&t"), { QKeySequence::Cut }, [this] { m_edit->cut(); });
-    m_copy = add(edit, tr("&Copy"), { QKeySequence::Copy }, [this] { m_edit->copy(); });
-    QAction *paste = add(edit, tr("&Paste"), { QKeySequence::Paste }, [this] { m_edit->paste(); });
-    m_delete = add(edit, tr("De&lete"), { QKeySequence::Delete }, [this] { m_edit->deleteSelection(); });
-    edit->addSeparator();
-    add(edit, tr("&Find..."), { QKeySequence::Find }, [this] { showFind(false); });
-    m_findNextAction = add(edit, tr("Find &Next"), { QKeySequence(Qt::Key_F3) }, [this] { findNext(false); });
-    m_findPrevAction = add(edit, tr("Find Pre&vious"), { QKeySequence(Qt::SHIFT | Qt::Key_F3) },
-                           [this] { findNext(true); });
-    add(edit, tr("R&eplace..."), { QKeySequence(tr("Ctrl+H")) }, [this] { showFind(true); });
-    add(edit, tr("&Go To..."), { QKeySequence(tr("Ctrl+G")) }, [this] { goToLine(); });
-    edit->addSeparator();
-    QAction *selectAll = add(edit, tr("Select &All"), { QKeySequence::SelectAll }, [this] { m_edit->selectAll(); });
-    add(edit, tr("Time/&Date"), { QKeySequence(Qt::Key_F5) }, [this] { insertTimeDate(); });
-
-    QMenu *format = new QMenu(tr("F&ormat"), this);
-    m_familyMenu = format->addMenu(tr("&Font"));
-    m_sizeMenu = format->addMenu(tr("&Size"));
-    m_familyGroup = new QActionGroup(this);
-    m_sizeGroup = new QActionGroup(this);
-    connect(m_familyMenu, &QMenu::aboutToShow, this, &NoteWindow::rebuildFamilyMenu);
-    connect(m_sizeMenu, &QMenu::aboutToShow, this, &NoteWindow::rebuildSizeMenu);
-    m_boldAction = add(format, tr("&Bold"), {}, [this](bool on) {
-        m_baseFont.setBold(on);
-        applyFont();
-    });
-    m_boldAction->setCheckable(true);
-    m_italicAction = add(format, tr("&Italic"), {}, [this](bool on) {
-        m_baseFont.setItalic(on);
-        applyFont();
-    });
-    m_italicAction->setCheckable(true);
-    add(format, tr("&More Fonts..."), {}, [this] { chooseFont(); });
-
-    QMenu *view = new QMenu(tr("&View"), this);
-    QMenu *zoom = view->addMenu(tr("&Zoom"));
-    add(zoom, tr("Zoom &In"), { QKeySequence::ZoomIn, QKeySequence(tr("Ctrl+=")) }, [this] { zoomBy(1); });
-    add(zoom, tr("Zoom &Out"), { QKeySequence::ZoomOut }, [this] { zoomBy(-1); });
-    add(zoom, tr("&Restore"), { QKeySequence(tr("Ctrl+0")) }, [this] { setZoom(100); });
-    m_statusAction = add(view, tr("&Status Bar"), {}, [this](bool on) {
-        m_statusVisible = on;
-        update();
-    });
-    m_statusAction->setCheckable(true);
-    view->addSeparator();
-    add(view, tr("Pre&vious Page"), { QKeySequence(Qt::CTRL | Qt::Key_PageUp) },
-        [this] { m_edit->showPage(m_edit->currentPage() - 1); });
-    add(view, tr("Ne&xt Page"), { QKeySequence(Qt::CTRL | Qt::Key_PageDown) },
-        [this] { m_edit->showPage(m_edit->currentPage() + 1); });
-
-    QMenu *help = new QMenu(tr("&Help"), this);
-    add(help, tr("&About WormholeNotes"), {}, [this] { about(); });
-
-    m_menus = { note, edit, format, view, help };
-
-    m_rootMenu = new QMenu(this);
-    for (QMenu *menu : m_menus)
-        m_rootMenu->addMenu(menu);
-
-    m_contextMenu = new QMenu(this);
-    m_contextMenu->addAction(m_undo);
-    m_contextMenu->addAction(m_redo);
-    m_contextMenu->addSeparator();
-    m_contextMenu->addAction(m_cut);
-    m_contextMenu->addAction(m_copy);
-    m_contextMenu->addAction(paste);
-    m_contextMenu->addAction(m_delete);
-    m_contextMenu->addSeparator();
-    m_contextMenu->addAction(selectAll);
-
-    // Alt+letter opens that menu from its place on the bezel; F10 opens Note.
-    const Qt::Key keys[] = { Qt::Key_N, Qt::Key_E, Qt::Key_O, Qt::Key_V, Qt::Key_H };
-    for (int i = 0; i < 5; ++i) {
-        auto *shortcut = new QShortcut(QKeySequence(Qt::ALT | keys[i]), this);
-        connect(shortcut, &QShortcut::activated, this, [this, i] { openMenu(i, true); });
-    }
-    auto *menuKey = new QShortcut(QKeySequence(Qt::Key_F10), this);
-    connect(menuKey, &QShortcut::activated, this, [this] { openMenu(0, true); });
-}
-
-// Both menus are refilled each time they open, so they always show the font
-// in use. clear() deletes the old actions, and a deleted action leaves its
-// group on its own, so the groups live as long as the window.
-void NoteWindow::rebuildFamilyMenu()
-{
-    // Monospaced faces first, as Tondo had them, then a few others worth
-    // reading at length. Only the ones actually installed appear.
-    static const QStringList preferred = {
-        QStringLiteral("Consolas"), QStringLiteral("Cascadia Mono"), QStringLiteral("Cascadia Code"),
-        QStringLiteral("Lucida Console"), QStringLiteral("Courier New"), QStringLiteral("Segoe UI"),
-        QStringLiteral("Georgia"), QStringLiteral("Palatino Linotype"), QStringLiteral("Comic Sans MS"),
-    };
-    const QStringList installed = QFontDatabase::families();
-    QStringList families;
-    for (const QString &family : preferred) {
-        if (installed.contains(family))
-            families.append(family);
-    }
-    if (!families.contains(m_baseFont.family()))
-        families.prepend(m_baseFont.family());
-
-    m_familyMenu->clear();
-    for (const QString &family : families) {
-        QAction *action = m_familyMenu->addAction(family);
-        action->setCheckable(true);
-        action->setChecked(family == m_baseFont.family());
-        m_familyGroup->addAction(action);
-        connect(action, &QAction::triggered, this, [this, family] {
-            m_baseFont.setFamily(family);
-            applyFont();
-        });
-    }
-}
-
-void NoteWindow::rebuildSizeMenu()
-{
-    m_sizeMenu->clear();
-    const int current = qRound(m_baseFont.pointSizeF());
-    for (const int size : { 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36 }) {
-        QAction *action = m_sizeMenu->addAction(QString::number(size));
-        action->setCheckable(true);
-        action->setChecked(size == current);
-        m_sizeGroup->addAction(action);
-        connect(action, &QAction::triggered, this, [this, size] {
-            m_baseFont.setPointSizeF(size);
-            applyFont();
-        });
-    }
-}
-
-void NoteWindow::updateActions()
-{
-    QTextDocument *doc = m_edit->document();
-    const bool selection = m_edit->textCursor().hasSelection();
-    m_undo->setEnabled(doc->isUndoAvailable());
-    m_redo->setEnabled(doc->isRedoAvailable());
-    m_cut->setEnabled(selection);
-    m_copy->setEnabled(selection);
-    m_delete->setEnabled(selection);
-    m_findNextAction->setEnabled(!doc->isEmpty());
-    m_findPrevAction->setEnabled(!doc->isEmpty());
-    m_statusAction->setChecked(m_statusVisible);
-    m_boldAction->setChecked(m_baseFont.bold());
-    m_italicAction->setChecked(m_baseFont.italic());
-}
-
-QString NoteWindow::statusText() const
-{
-    if (!m_flash.isEmpty())
-        return m_flash;
-    const QTextCursor cursor = m_edit->textCursor();
-    QString position = tr("Ln %1, Col %2").arg(cursor.blockNumber() + 1).arg(cursor.positionInBlock() + 1);
-    if (cursor.hasSelection())
-        position += tr(" (%1 selected)").arg(cursor.selectionEnd() - cursor.selectionStart());
-    const QStringList parts = { position, QStringLiteral("%1%").arg(m_zoom) };
-    return parts.join(QStringLiteral("   ·   "));
-}
-
-void NoteWindow::flash(const QString &message)
-{
-    m_flash = message;
-    m_flashTimer.start(3500);
-    update();
-}
-
-void NoteWindow::applyTheme()
-{
-    const Theme t = theme();
-
-    RoundEdit::Colors edit;
-    edit.ink = t.ink;
-    edit.selection = t.selection;
-    edit.guide = withAlpha(t.ink, t.dark ? 16 : 13);
-    edit.hub = t.faceEdge;
-    edit.hubEdge = withAlpha(t.ink, 50);
-    edit.hubInk = withAlpha(t.ink, 200);
-    edit.hubHover = withAlpha(kAccent, 60);
-    m_edit->setColors(edit);
-
-    RadialMenu::Colors menu;
-    menu.band = t.band;
-    menu.bandEdge = t.bandEdge;
-    menu.ink = t.ink;
-    menu.dim = withAlpha(t.ink, 90);
-    menu.accent = kAccent;
-    menu.accentInk = QColor(0xff, 0xf7, 0xf4);
-    menu.shade = QColor(0, 0, 0, t.dark ? 90 : 36);
-    m_radial->setColors(menu);
-
-    RadialPrompt::Colors prompt;
-    prompt.band = t.band;
-    prompt.bandEdge = t.bandEdge;
-    prompt.ink = t.ink;
-    prompt.dim = withAlpha(t.ink, 140);
-    prompt.accent = kAccent;
-    prompt.accentInk = QColor(0xff, 0xf7, 0xf4);
-    prompt.shade = QColor(0, 0, 0, t.dark ? 120 : 70);
-    prompt.field = t.field;
-    prompt.selection = withAlpha(kAccent, 80);
-    m_prompt->setColors(prompt);
-}
-
-void NoteWindow::applyFont()
-{
-    QFont font = m_baseFont;
-    const qreal base = m_baseFont.pointSizeF() > 0 ? m_baseFont.pointSizeF() : 11.0;
-    font.setPointSizeF(qMax(1.0, base * m_zoom / 100.0));
-    m_edit->setFont(font);
-    m_edit->setTabStopDistance(QFontMetricsF(font).horizontalAdvance(u' ') * 8);
-    updateActions();
-}
-
-void NoteWindow::zoomBy(int steps)
-{
-    setZoom(m_zoom + steps * 10);
-}
-
-void NoteWindow::setZoom(int percent)
-{
-    percent = qBound(kMinZoom, percent, kMaxZoom);
-    if (percent == m_zoom)
-        return;
-    m_zoom = percent;
-    applyFont();
-    update();
-}
-
-// ---------------------------------------------------------------------------
-// Prompts
-
-int NoteWindow::ask(const QStringList &lines, const QList<QPair<QString, int>> &buttons, int defaultId,
-                     int cancelId)
-{
-    // One question at a time. Resetting a prompt that is still waiting would
-    // strand the event loop it is waiting in.
-    if (modalOpen())
-        return cancelId;
-    m_radial->close();
-    m_prompt->reset(true);
-    for (const QString &line : lines)
-        m_prompt->addMessage(line);
-    for (const auto &[label, id] : buttons)
-        m_prompt->addButton(label, id, id == defaultId);
-    m_prompt->setCancelId(cancelId);
-    return m_prompt->exec();
-}
-
-void NoteWindow::tell(const QStringList &lines)
-{
-    ask(lines, { { tr("OK"), OkId } }, OkId, OkId);
-}
-
-// ---------------------------------------------------------------------------
-// Find, replace, go to
-
-void NoteWindow::showFind(bool replaceMode)
-{
-    if (modalOpen())
-        return;
-    m_radial->close();
-    QString seed = m_edit->textCursor().selectedText();
-    // A selection spanning lines is not something anyone meant to search for.
-    if (seed.contains(QChar::ParagraphSeparator))
-        seed.clear();
-    if (seed.isEmpty())
-        seed = m_lastSearch.needle;
-
-    m_prompt->reset(false);
-    m_promptMode = replaceMode ? PromptMode::Replace : PromptMode::Find;
-    m_findField = m_prompt->addField(tr("Find"), seed);
-    m_replaceField = replaceMode ? m_prompt->addField(tr("Replace"), m_lastSearch.replacement) : -1;
-    m_caseToggle = m_prompt->addToggle(tr("Match case"), m_lastSearch.matchCase);
-    m_wrapToggle = m_prompt->addToggle(tr("Wrap around"), m_lastSearch.wrapAround);
-    // Notepad's Replace always searches forward, so it has no direction.
-    m_upToggle = replaceMode ? -1 : m_prompt->addToggle(tr("Search up"), m_lastSearch.backward);
-    m_prompt->addButton(tr("Find Next"), FindNextId, true);
-    if (replaceMode) {
-        m_prompt->addButton(tr("Replace"), ReplaceId);
-        m_prompt->addButton(tr("Replace All"), ReplaceAllId);
-    }
-    m_prompt->addButton(tr("Close"), CloseId);
-    m_prompt->setCancelId(CloseId);
-    m_prompt->present();
-    // Pull the text in from the rim so the prompt's rings cover none of it.
-    m_edit->setOuterMargin(m_prompt->depth());
-}
-
-SearchOptions NoteWindow::promptOptions() const
-{
-    SearchOptions options = m_lastSearch;
-    options.needle = m_prompt->fieldText(m_findField);
-    if (m_replaceField >= 0)
-        options.replacement = m_prompt->fieldText(m_replaceField);
-    options.matchCase = m_prompt->toggleState(m_caseToggle);
-    options.wrapAround = m_prompt->toggleState(m_wrapToggle);
-    options.backward = m_upToggle >= 0 && m_prompt->toggleState(m_upToggle);
-    return options;
-}
-
-void NoteWindow::onPromptButton(int id)
-{
-    switch (id) {
-    case FindNextId:
-        findWith(promptOptions());
-        break;
-    case ReplaceId:
-        replaceOne();
-        break;
-    case ReplaceAllId:
-        replaceAll();
-        break;
-    case CloseId:
-        m_prompt->dismiss();
-        break;
-    default:
-        break;
-    }
-}
-
-bool NoteWindow::findNext(bool backward)
-{
-    if (m_lastSearch.needle.isEmpty()) {
-        showFind(false);
-        return false;
-    }
-    SearchOptions options = m_promptMode != PromptMode::None ? promptOptions() : m_lastSearch;
-    options.backward = backward;
-    return findWith(options);
-}
-
-bool NoteWindow::findWith(const SearchOptions &options)
-{
-    m_lastSearch = options;
-    if (options.needle.isEmpty())
-        return false;
-
-    QTextDocument::FindFlags flags;
-    if (options.matchCase)
-        flags |= QTextDocument::FindCaseSensitively;
-    if (options.backward)
-        flags |= QTextDocument::FindBackward;
-
-    QTextDocument *doc = m_edit->document();
-    QTextCursor found = doc->find(options.needle, m_edit->textCursor(), flags);
-    if (found.isNull() && options.wrapAround) {
-        QTextCursor from(doc);
-        if (options.backward)
-            from.movePosition(QTextCursor::End);
-        found = doc->find(options.needle, from, flags);
-    }
-    if (found.isNull()) {
-        flash(tr("Cannot find “%1”").arg(options.needle));
-        return false;
-    }
-    m_edit->setTextCursor(found);
-    return true;
-}
-
-void NoteWindow::replaceOne()
-{
-    SearchOptions options = promptOptions();
-    options.backward = false;
-    QTextCursor cursor = m_edit->textCursor();
-    const Qt::CaseSensitivity cs = options.matchCase ? Qt::CaseSensitive : Qt::CaseInsensitive;
-    if (cursor.hasSelection() && QString::compare(cursor.selectedText(), options.needle, cs) == 0) {
-        cursor.insertText(options.replacement);
-        m_edit->setTextCursor(cursor);
-    }
-    findWith(options);
-}
-
-void NoteWindow::replaceAll()
-{
-    const SearchOptions options = promptOptions();
-    m_lastSearch = options;
-    if (options.needle.isEmpty())
-        return;
-
-    QTextDocument::FindFlags flags;
-    if (options.matchCase)
-        flags |= QTextDocument::FindCaseSensitively;
-
-    QTextDocument *doc = m_edit->document();
-    QTextCursor batch(doc);
-    batch.beginEditBlock();
-    int count = 0;
-    QTextCursor cursor(doc);
-    for (;;) {
-        cursor = doc->find(options.needle, cursor, flags);
-        if (cursor.isNull())
-            break;
-        cursor.insertText(options.replacement);
-        ++count;
-    }
-    batch.endEditBlock();
-    flash(count == 0 ? tr("Cannot find “%1”").arg(options.needle)
-                     : tr("Replaced %n occurrence(s)", nullptr, count));
-}
-
-void NoteWindow::goToLine()
-{
-    if (modalOpen())
-        return;
-    QTextDocument *doc = m_edit->document();
-    m_radial->close();
-    m_prompt->reset(true);
-    m_prompt->addMessage(tr("Go to line, 1 to %1").arg(doc->blockCount()));
-    const int field = m_prompt->addField(tr("Line"), QString::number(m_edit->textCursor().blockNumber() + 1), true);
-    m_prompt->addButton(tr("Go To"), OkId, true);
-    m_prompt->addButton(tr("Cancel"), CancelId);
-    m_prompt->setCancelId(CancelId);
-    if (m_prompt->exec() != OkId)
-        return;
-    const int line = m_prompt->fieldText(field).toInt();
-    if (line < 1 || line > doc->blockCount()) {
-        flash(tr("The line number is beyond the total number of lines"));
-        return;
-    }
-    m_edit->setTextCursor(QTextCursor(doc->findBlockByNumber(line - 1)));
-}
-
-void NoteWindow::insertTimeDate()
-{
-    const QLocale locale = QLocale::system();
-    const QDateTime now = QDateTime::currentDateTime();
-    m_edit->insertPlainText(locale.toString(now.time(), QLocale::ShortFormat) + u' '
-                            + locale.toString(now.date(), QLocale::ShortFormat));
-}
-
-void NoteWindow::chooseFont()
-{
-    bool ok = false;
-    m_choosingFont = true;
-    const QFont font = QFontDialog::getFont(&ok, m_baseFont, this, tr("Font"));
-    m_choosingFont = false;
-    if (ok) {
-        m_baseFont = font;
-        applyFont();
-    }
 }
 
 void NoteWindow::about()
 {
-    tell({ tr("WormholeNotes %1").arg(QCoreApplication::applicationVersion()),
-           tr("A sticky note that tunnels through every window."), tr("Built on Tondo by Archon."),
-           tr("Locke Werks") });
+    ask(tr("WormholeNotes %1 · Locke Werks\nInspired by Tondo, by Archon").arg(QCoreApplication::applicationVersion()),
+        tr("OK"), QString(), [this](bool) { m_face->setFocus(); });
 }
 
-// ---------------------------------------------------------------------------
-// Settings
+void NoteWindow::ask(const QString &question, const QString &yes, const QString &no, std::function<void(bool)> answer)
+{
+    m_band->open(question, yes, no, std::move(answer), theme().dark);
+}
+
+bool NoteWindow::asking() const
+{
+    return m_band->isVisible();
+}
+
+void NoteWindow::zoomBy(int steps)
+{
+    m_zoom = qBound(kMinZoom, m_zoom + steps * 10, kMaxZoom);
+    applyFont();
+}
+
+// A bigger note holds more words, like a bigger card; the zoom is what makes
+// the letters bigger.
+void NoteWindow::applyFont()
+{
+    QFont font(QStringLiteral("Segoe UI Variable Text"));
+    font.setPointSizeF(11.0 * m_zoom / 100.0);
+    m_face->setTextFont(font);
+}
 
 void NoteWindow::loadSettings()
 {
     QSettings settings;
-    m_baseFont = QFont(QStringLiteral("Consolas"), 11);
-    const QString font = settings.value(QStringLiteral("font")).toString();
-    if (!font.isEmpty())
-        m_baseFont.fromString(font);
-    m_zoom = qBound(kMinZoom, settings.value(QStringLiteral("zoom"), 100).toInt(), kMaxZoom);
-    m_statusVisible = settings.value(QStringLiteral("statusBar"), true).toBool();
-
-    m_restoreRadius = settings.value(QStringLiteral("radius"), kDefaultRadius).toInt();
+    m_zoom = qBound(kMinZoom, settings.value(QStringLiteral("note/zoom"), 100).toInt(), kMaxZoom);
+    m_restoreRadius = settings.value(QStringLiteral("note/radius"), kDefaultRadius).toInt();
+    m_radius = m_restoreRadius;
 }
 
 void NoteWindow::saveSettings() const
 {
     QSettings settings;
-    settings.setValue(QStringLiteral("font"), m_baseFont.toString());
-    settings.setValue(QStringLiteral("zoom"), m_zoom);
-    settings.setValue(QStringLiteral("statusBar"), m_statusVisible);
-    settings.setValue(QStringLiteral("radius"), m_maximized || !isVisible() ? m_restoreRadius : m_radius);
+    settings.setValue(QStringLiteral("note/zoom"), m_zoom);
+    settings.setValue(QStringLiteral("note/radius"), isVisible() ? m_radius : m_restoreRadius);
 }

@@ -3,10 +3,11 @@
 // Usage: wormhole-render <output directory>
 
 #include "../src/NoteWindow.h"
-#include "../src/RoundEdit.h"
 
 #include <QApplication>
 #include <QDir>
+#include <QGuiApplication>
+#include <QStyleHints>
 #include <QPixmap>
 #include <QSettings>
 #include <QStandardPaths>
@@ -39,5 +40,13 @@ int main(int argc, char *argv[])
     note.setRing(ring, 0);
     note.setSheet(QStringLiteral("Desktop"), QString(), 0, 1);
     note.grab().save(dir + QStringLiteral("/note-desktop.png"));
+
+    QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Light);
+    QCoreApplication::processEvents();
+    note.setRing(ring, 3);
+    note.setSheet(QStringLiteral("github.com"),
+                  QStringLiteral("Review the Forge schema before wiring the installer.\nAsk Archon about the ring layout."),
+                  1, 3);
+    note.grab().save(dir + QStringLiteral("/note-light.png"));
     return 0;
 }

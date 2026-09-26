@@ -25,16 +25,12 @@ set(WORMHOLENOTES_SOURCES
     src/HoleWindow.h
     src/NoteWindow.cpp
     src/NoteWindow.h
-    src/Arc.cpp
-    src/Arc.h
-    src/RingTextLayout.cpp
-    src/RingTextLayout.h
-    src/RoundEdit.cpp
-    src/RoundEdit.h
-    src/RadialMenu.cpp
-    src/RadialMenu.h
-    src/RadialPrompt.cpp
-    src/RadialPrompt.h
+    src/NoteFace.cpp
+    src/NoteFace.h
+    src/CircleLayout.cpp
+    src/CircleLayout.h
+    src/Round.cpp
+    src/Round.h
 )
 
 if(WIN32)
@@ -91,15 +87,11 @@ qt_add_executable(wormhole-render
     tests/render.cpp
     src/NoteWindow.cpp
     src/NoteWindow.h
-    src/Arc.cpp
-    src/Arc.h
-    src/RingTextLayout.cpp
-    src/RingTextLayout.h
-    src/RoundEdit.cpp
-    src/RoundEdit.h
-    src/RadialMenu.cpp
-    src/RadialMenu.h
-    src/RadialPrompt.cpp
-    src/RadialPrompt.h
+    src/NoteFace.cpp
+    src/NoteFace.h
+    src/CircleLayout.cpp
+    src/CircleLayout.h
+    src/Round.cpp
+    src/Round.h
 )
 target_link_libraries(wormhole-render PRIVATE Qt6::Widgets)

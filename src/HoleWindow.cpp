@@ -70,10 +70,10 @@ void HoleWindow::paintEvent(QPaintEvent *)
         p.drawEllipse(c, r + kMargin, r + kMargin);
     }
 
-    // The rim: Tondo's bezel, shrunk to a grommet.
+    // The rim: the note's own, shrunk to a grommet.
     QLinearGradient rim(c.x(), c.y() - r, c.x(), c.y() + r);
-    rim.setColorAt(0, QColor(0xe2, 0x36, 0x3b));
-    rim.setColorAt(1, QColor(0xa4, 0x1b, 0x20));
+    rim.setColorAt(0, QColor(0x7d, 0x5c, 0xe8));
+    rim.setColorAt(1, QColor(0x3b, 0x28, 0x91));
     p.setPen(Qt::NoPen);
     p.setBrush(rim);
     p.drawEllipse(c, r, r);

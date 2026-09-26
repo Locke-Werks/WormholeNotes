@@ -17,9 +17,9 @@ High school note cards came hole-punched in the top corner with a binder clip
 through them. WormholeNotes is that hole: a small punched circle that sits on
 whatever window you are using and opens into a note about it.
 
-Every app is a place, and every page in a browser is its own place. Each place
-has one sheet. Switch windows and the hole moves to the new window with that
-place's sheet behind it.
+Every app is a place, and every site in a browser is its own place, told
+apart by the host in the address bar. Switch windows and the hole moves to
+the new window with that place's notes behind it.
 
 ## Driving it
 
@@ -27,21 +27,27 @@ place's sheet behind it.
 | --- | --- |
 | Click the hole | The note for this place opens out of it |
 | Drag the hole | It moves; this place remembers where |
-| Escape, the close button, or switch apps | The note folds back into the hole |
-| Click the tray icon | The note for the current place |
-| Note > Quit, or the tray menu | WormholeNotes exits |
+| Drag the binder clip round the rim, or scroll over the rim | The note turns to another open place |
+| The arrows at the foot of the note | The next or previous page, then sheet; past the last, a new sheet |
+| The pushers on the rim: plus, minus, dot | New sheet, delete sheet, put away |
+| Escape, or switch apps | The note folds back into the hole |
+| Right-click the note | Edit commands, About, Quit |
+| Drag the rim, or its outer edge | The note moves, or the circle resizes |
 
-A hole with something written behind it glows. An empty one is dark.
+A hole with something written behind it glows. An empty one is dark. On the
+rim, a notch marks every open place, bright where something is written, in
+the same order as the taskbar.
+
+A place can hold several sheets, one thought each. Blank sheets are never
+kept and close with their page.
 
 Sheets are stored locally in `%LOCALAPPDATA%\Locke Werks\WormholeNotes\sheets.json`.
 Nothing is synced.
 
 ## Status
 
-Early. Browser pages are told apart by window title for now, which shifts as
-pages load. Reading the address bar and a browser extension come next, along
-with a ring of open places on the bezel, several notes per place, and tearing a
-note off onto the desktop.
+Early. Tearing a note off onto the desktop and a browser extension for page
+detection are next.
 
 ## Requirements
 
@@ -58,9 +64,8 @@ cmake --build --preset release
 
 ## Credit
 
-The round window, the ring text layout, the radial menus and prompts are from
-[Tondo](https://github.com/Locke-Werks/tondo) by Archon. WormholeNotes began as
-a copy of it.
+Inspired by [Tondo](https://github.com/Locke-Werks/tondo), Archon's notepad in
+the round.
 
 ## License
 

@@ -38,9 +38,9 @@ PARTICULAR PURPOSE. See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License along with this
 program. If not, see <https://www.gnu.org/licenses/>.
 
-WormholeNotes is built on Tondo by Archon, and with Qt, used under the GNU LGPL
-version 3. The Qt libraries are installed as separate DLLs beside
-WormholeNotes.exe and can be replaced.
+WormholeNotes is built with Qt, used under the GNU LGPL version 3. The Qt
+libraries are installed as separate DLLs beside WormholeNotes.exe and can be
+replaced.
 
 The complete source is at https://github.com/Locke-Werks/WormholeNotes
 """
