@@ -35,6 +35,7 @@ the new window with that place's notes behind it.
 | Tray menu > Show Desk Notes | Desk notes come up above your windows until you switch apps |
 | Tray menu > Find in Notes, or Win+Shift+F | Search every sheet in every place; Enter opens the note at the match. Ctrl+Alt+Shift+F when another program holds Win+Shift+F |
 | Tray menu > Export Notes | Every note in one Markdown file, a section per place |
+| Tray menu > Restore Notes | Your notes go back to a day's backup; the notes it replaced are listed first, to undo it |
 | Tray menu > Hide Wormhole | Everything off screen for recording or sharing, until you untick it, restarts included |
 | Drag the rim, or its outer edge | The note moves, or the circle resizes |
 
@@ -58,13 +59,31 @@ A place can hold several sheets, one thought each. Blank sheets are never
 kept and close with their page.
 
 Sheets are stored locally in `%LOCALAPPDATA%\Locke Werks\WormholeNotes\sheets.json`.
-Nothing is synced. A dated copy is kept in the `backups` folder beside it each day, the last 14 days.
+Nothing is synced. A dated copy is kept in the `backups` folder beside it each day, the last 14 days,
+and Restore Notes in the tray menu brings one back.
 
 Drag a note by its rim, or drag a hole with writing behind it, and a Tear off
 target appears at the foot of the screen; drop it there and the sheet becomes a
 small round note on the desktop. Right-click a note for Tear Off to Desktop,
 too. Desk notes sit under your windows; Show Desk Notes in the tray menu brings
 them up, and dragging one onto any window hands its writing to that place.
+
+## Installing
+
+Download `WormholeNotes-<version>-Setup.exe` from
+[Releases](https://github.com/Locke-Werks/WormholeNotes/releases) and run it.
+It installs to Program Files for everyone on the machine, with a Start Menu
+shortcut, and starts WormholeNotes at sign-in; setup has a checkbox for each.
+Silent install: `/S`, with `/O:start_menu=off`, `/O:sign_in=off` or
+`/O:desktop=on` to change the defaults.
+
+The portable zip runs from any folder, with nothing to install.
+
+Neither is signed yet, so SmartScreen warns the first time. Choose More info,
+then Run anyway.
+
+Uninstalling from Installed apps removes the program and its browser
+registration. Your notes stay in `%LOCALAPPDATA%\Locke Werks\WormholeNotes`.
 
 ## Browser extension
 
