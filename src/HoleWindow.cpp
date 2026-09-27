@@ -1,5 +1,7 @@
 #include "HoleWindow.h"
 
+#include "Theme.h"
+
 #include <QApplication>
 #include <QMouseEvent>
 #include <QPainter>
@@ -34,6 +36,14 @@ void HoleWindow::setFilled(bool filled)
     update();
 }
 
+void HoleWindow::setColour(const QColor &colour)
+{
+    if (colour == m_colour)
+        return;
+    m_colour = colour;
+    update();
+}
+
 void HoleWindow::placeAt(const QPoint &c)
 {
     HWND hwnd = HWND(winId());
@@ -60,40 +70,37 @@ void HoleWindow::paintEvent(QPaintEvent *)
     p.setRenderHint(QPainter::Antialiasing);
     const QPointF c(width() / 2.0, height() / 2.0);
     const qreal r = kRadius;
+    const QColor colour = m_colour.isValid() ? m_colour : Theme::accent();
 
-    if (m_hover) {
+    // Light spilling out of the hole: only when something is written behind
+    // it, stronger under the pointer.
+    if (m_filled || m_hover) {
         QRadialGradient glow(c, r + kMargin);
-        glow.setColorAt(0.7, QColor(0x2e, 0xe8, 0xff, 90));
-        glow.setColorAt(1, QColor(0x2e, 0xe8, 0xff, 0));
+        glow.setColorAt(0.55, Theme::withAlpha(colour, m_hover ? 140 : 90));
+        glow.setColorAt(1, Theme::withAlpha(colour, 0));
         p.setPen(Qt::NoPen);
         p.setBrush(glow);
         p.drawEllipse(c, r + kMargin, r + kMargin);
     }
 
-    // The rim: the note's own, shrunk to a grommet.
-    QLinearGradient rim(c.x(), c.y() - r, c.x(), c.y() + r);
-    rim.setColorAt(0, QColor(0x7d, 0x5c, 0xe8));
-    rim.setColorAt(1, QColor(0x3b, 0x28, 0x91));
-    p.setPen(Qt::NoPen);
-    p.setBrush(rim);
+    // The grommet: a raised ring with a hairline edge.
+    p.setPen(QPen(Theme::hairlineStrong(), 1));
+    p.setBrush(Theme::raised());
     p.drawEllipse(c, r, r);
 
-    // The tunnel. A hole with a note behind it glows; an empty one is dark.
+    // The tunnel: the ground, and a lit core when there is writing behind it.
     const qreal inner = r - 3.5;
     QRadialGradient tunnel(c, inner);
     if (m_filled) {
-        tunnel.setColorAt(0, QColor(0xe8, 0xfd, 0xff));
-        tunnel.setColorAt(0.35, QColor(0x2e, 0xe8, 0xff));
-        tunnel.setColorAt(1, QColor(0xb0, 0x5c, 0xf6));
+        tunnel.setColorAt(0, colour.lighter(140));
+        tunnel.setColorAt(0.45, colour);
+        tunnel.setColorAt(1, Theme::ground());
     } else {
-        tunnel.setColorAt(0, QColor(0x2e, 0x4a, 0x66));
-        tunnel.setColorAt(1, QColor(0x14, 0x12, 0x1e));
+        tunnel.setColorAt(0, Theme::pressed());
+        tunnel.setColorAt(1, Theme::ground());
     }
+    p.setPen(QPen(m_filled ? Theme::withAlpha(colour, 200) : Theme::hairline(), 1));
     p.setBrush(tunnel);
-    p.drawEllipse(c, inner, inner);
-
-    p.setBrush(Qt::NoBrush);
-    p.setPen(QPen(QColor(0, 0, 0, 110), 1.2));
     p.drawEllipse(c, inner, inner);
 }
 

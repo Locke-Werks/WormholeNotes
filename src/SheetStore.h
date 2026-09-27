@@ -15,6 +15,9 @@ struct PlaceRecord
     // handed out: a place with nothing written still has one blank sheet
     // ready, because opening a new page opens a note.
     QStringList sheets;
+    // Each sheet's ring colour, as #rrggbb, beside its text; empty for the
+    // default. Always the same length as sheets.
+    QStringList colours;
     // Where the hole sits on the window, in device-independent pixels: x from
     // the window's right edge, y from its top. Right-anchored, because that is
     // the corner a hole punch goes through and it survives a window resize.
@@ -46,6 +49,7 @@ public:
 
     PlaceRecord place(const QString &key) const;
     void setSheet(const QString &key, const QString &label, int index, const QString &text);
+    void setColour(const QString &key, int index, const QString &colour);
     // Adds a blank sheet at the end and returns its index.
     int addSheet(const QString &key, const QString &label);
     void removeSheet(const QString &key, int index);
@@ -54,7 +58,7 @@ public:
     void dropBlanks(const QString &key);
 
     // Desk notes live under keys of their own, "desk:" and an id.
-    QString newDeskNote(const QStringList &sheets, const QPoint &at);
+    QString newDeskNote(const QStringList &sheets, const QPoint &at, const QStringList &colours = {});
     void setDesk(const QString &key, const QPoint &at);
     QStringList deskKeys() const;
     void forget(const QString &key);

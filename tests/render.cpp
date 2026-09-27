@@ -3,6 +3,7 @@
 // Usage: wormhole-render <output directory>
 
 #include "../src/NoteWindow.h"
+#include "../src/Theme.h"
 
 #include <QApplication>
 #include <QDir>
@@ -19,6 +20,8 @@ int main(int argc, char *argv[])
     // real app's.
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, QDir::tempPath());
+    Theme::loadFonts();
+    app.setStyleSheet(Theme::styleSheet());
     const QString dir = argc > 1 ? QString::fromLocal8Bit(argv[1]) : QDir::currentPath();
 
     NoteWindow note;
@@ -41,12 +44,12 @@ int main(int argc, char *argv[])
     note.setSheet(QStringLiteral("Desktop"), QString(), 0, 1);
     note.grab().save(dir + QStringLiteral("/note-desktop.png"));
 
-    QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Light);
-    QCoreApplication::processEvents();
+    // A sheet with a ring colour of its own.
+    note.setSheetColour(QColor("#FF2D95"));
     note.setRing(ring, 3);
     note.setSheet(QStringLiteral("github.com"),
                   QStringLiteral("Review the Forge schema before wiring the installer.\nAsk Archon about the ring layout."),
                   1, 3);
-    note.grab().save(dir + QStringLiteral("/note-light.png"));
+    note.grab().save(dir + QStringLiteral("/note-magenta.png"));
     return 0;
 }

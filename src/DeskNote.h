@@ -18,6 +18,7 @@ public:
     explicit DeskNote(QWidget *parent = nullptr);
 
     void setText(const QString &text);
+    void setColour(const QColor &colour);
     // Its centre, in logical screen coordinates and in physical pixels.
     QPoint logicalCenter() const;
     QPoint physicalCenter() const;
@@ -38,6 +39,7 @@ protected:
 
 private:
     QTextDocument m_doc;
+    QColor m_colour;
     SpiralLayout m_layout;
     bool m_pressed = false;
     bool m_dragging = false;

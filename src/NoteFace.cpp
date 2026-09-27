@@ -1,5 +1,7 @@
 #include "NoteFace.h"
 
+#include "Theme.h"
+
 #include <QApplication>
 #include <QClipboard>
 #include <QGuiApplication>
@@ -177,6 +179,12 @@ void NoteFace::paintEvent(QPaintEvent *)
     circle.addEllipse(c, r, r);
     p.setClipPath(circle);
 
+    // The bloom: the sheet's colour, faint, as if lit from above the rim.
+    QRadialGradient bloom(c.x(), -r * 0.2, r * 1.3);
+    bloom.setColorAt(0, m_colors.bloom);
+    bloom.setColorAt(1, Theme::withAlpha(m_colors.bloom, 0));
+    p.fillRect(QRectF(0, 0, 2 * r, 2 * r), bloom);
+
     // The groove the writing follows, faint, like the rule on a card.
     m_layout.drawGroove(p, m_colors.rule);
     m_layout.draw(p, m_page, m_colors.ink, m_colors.selection, m_colors.control, m_cursor.selectionStart(),
@@ -193,9 +201,7 @@ void NoteFace::paintEvent(QPaintEvent *)
     if (!(pages || sheets || canTurn(1)))
         return;
     const qreal hub = m_layout.hubRadius();
-    QFont font(QStringLiteral("Segoe UI Variable Text"));
-    font.setPixelSize(qMax(10, qRound(hub * 0.26)));
-    font.setWeight(QFont::DemiBold);
+    QFont font = Theme::labelFont(qMax(10.0, hub * 0.22));
     p.setFont(font);
     p.setPen(m_colors.control);
     const QRectF back = controlRect(Back);
@@ -203,8 +209,7 @@ void NoteFace::paintEvent(QPaintEvent *)
     const QRectF marker(back.right(), c.y() - hub * 0.2, on.left() - back.right(), hub * 0.4);
     p.drawText(marker, Qt::AlignCenter, QStringLiteral("%1/%2").arg(m_sheetIndex + 1).arg(m_sheetCount));
     if (pages) {
-        font.setPixelSize(qMax(8, qRound(hub * 0.17)));
-        font.setWeight(QFont::Normal);
+        font = Theme::labelFont(qMax(8.0, hub * 0.13));
         p.setFont(font);
         p.drawText(QRectF(c.x() - hub, c.y() + hub * 0.2, 2 * hub, hub * 0.3), Qt::AlignCenter,
                    tr("page %1 of %2").arg(m_page + 1).arg(m_layout.pageCount()));

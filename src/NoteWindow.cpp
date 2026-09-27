@@ -2,6 +2,7 @@
 
 #include "NoteFace.h"
 #include "Round.h"
+#include "Theme.h"
 
 #include <QAction>
 #include <QApplication>
@@ -35,16 +36,7 @@ constexpr int kMinZoom = 50;
 constexpr int kMaxZoom = 300;
 
 // The pushers sit at the upper right of the rim, like a stopwatch's.
-constexpr qreal kPusherAngle[] = { -64, -49, -34 };
-
-const QColor kCyan(0x2e, 0xe8, 0xff);
-const QColor kViolet(0x6b, 0x3f, 0xd6);
-
-QColor alpha(QColor color, int a)
-{
-    color.setAlpha(a);
-    return color;
-}
+constexpr qreal kPusherAngle[] = { -68, -55, -42, -29 };
 
 } // namespace
 
@@ -65,13 +57,13 @@ public:
     }
 
     void open(const QString &question, const QString &yes, const QString &no, std::function<void(bool)> answer,
-              bool dark)
+              const QColor &colour)
     {
         m_question = question;
         m_yes = yes;
         m_no = no;
         m_answer = std::move(answer);
-        m_dark = dark;
+        m_colour = colour;
         m_hover = -1;
         show();
         raise();
@@ -115,31 +107,33 @@ protected:
         QPainterPath circle;
         circle.addEllipse(QPointF(r, r), r, r);
         p.setClipPath(circle);
-        p.fillRect(rect(), QColor(0, 0, 0, m_dark ? 110 : 60));
+        p.fillRect(rect(), Theme::withAlpha(Theme::ground(), 150));
         const QRectF b = band();
-        p.fillRect(b, m_dark ? QColor(0x1c, 0x19, 0x24, 245) : QColor(0xff, 0xfd, 0xf6, 248));
-        p.setPen(QPen(alpha(kViolet, 160), 1.5));
+        p.fillRect(b, Theme::raised());
+        p.setPen(QPen(Theme::hairlineStrong(), 1));
         p.drawLine(b.topLeft(), b.topRight());
         p.drawLine(b.bottomLeft(), b.bottomRight());
 
-        QFont font(QStringLiteral("Segoe UI Variable Text"));
-        font.setPixelSize(qMax(11, qRound(r * 0.08)));
-        p.setFont(font);
-        p.setPen(m_dark ? QColor(0xec, 0xe6, 0xf5) : QColor(0x2a, 0x24, 0x33));
+        // The question in the display serif, the answers as house buttons:
+        // the one that acts lit in the sheet's colour, the other a hairline.
+        p.setFont(Theme::serifFont(qMax(13.0, r * 0.1)));
+        p.setPen(Theme::textPrimary());
         p.drawText(QRectF(b.left(), b.top(), b.width(), b.height() * 0.5), Qt::AlignCenter, m_question);
 
-        font.setWeight(QFont::DemiBold);
-        p.setFont(font);
+        p.setFont(Theme::labelFont(qMax(9.0, r * 0.055)));
         for (int i = 0; i < (m_no.isEmpty() ? 1 : 2); ++i) {
             const QRectF box = pill(i);
             const bool primary = i == 0;
-            QColor fill = primary ? kViolet : (m_dark ? QColor(0x3a, 0x35, 0x46) : QColor(0xec, 0xe8, 0xf4));
-            if (m_hover == i)
-                fill = fill.lighter(primary ? 120 : 106);
-            p.setPen(Qt::NoPen);
-            p.setBrush(fill);
-            p.drawRoundedRect(box, box.height() / 2, box.height() / 2);
-            p.setPen(primary ? QColor(Qt::white) : (m_dark ? QColor(0xec, 0xe6, 0xf5) : QColor(0x2a, 0x24, 0x33)));
+            const bool hot = m_hover == i;
+            if (primary) {
+                p.setPen(QPen(hot ? m_colour : Theme::withAlpha(m_colour, 115), 1));
+                p.setBrush(Theme::withAlpha(m_colour, hot ? 52 : 30));
+            } else {
+                p.setPen(QPen(hot ? Theme::hairlineStrong() : Theme::hairline(), 1));
+                p.setBrush(Qt::NoBrush);
+            }
+            p.drawRoundedRect(box, 3, 3);
+            p.setPen(primary || hot ? Theme::textPrimary() : Theme::textSecondary());
             p.drawText(box, Qt::AlignCenter, primary ? m_yes : m_no);
         }
     }
@@ -187,7 +181,7 @@ private:
     QString m_yes;
     QString m_no;
     std::function<void(bool)> m_answer;
-    bool m_dark = false;
+    QColor m_colour;
     int m_hover = -1;
 };
 
@@ -210,10 +204,6 @@ NoteWindow::NoteWindow(QWidget *parent)
     connect(m_face, &NoteFace::sheetTurnRequested, this, &NoteWindow::sheetTurnRequested);
     connect(m_face, &NoteFace::zoomRequested, this, &NoteWindow::zoomBy);
     connect(m_face, &NoteFace::contextMenuRequested, this, [this](const QPoint &at) { m_menu->popup(at); });
-    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this] {
-        applyTheme();
-        update();
-    });
 
     m_menu = new QMenu(this);
     QAction *undo = m_menu->addAction(tr("Undo\tCtrl+Z"), m_face, &NoteFace::undo);
@@ -227,6 +217,15 @@ NoteWindow::NoteWindow(QWidget *parent)
     m_menu->addSeparator();
     m_menu->addAction(tr("New Sheet\tCtrl+N"), this, [this] { pressPusher(NewPusher); });
     m_menu->addAction(tr("Delete Sheet"), this, [this] { pressPusher(DeletePusher); });
+    m_colourMenu = m_menu->addMenu(tr("Ring Colour"));
+    for (const Theme::Family &family : Theme::families()) {
+        QAction *action = m_colourMenu->addAction(family.name, this, [this, colour = family.colour] {
+            setSheetColour(colour);
+            emit colourChosen(colour);
+        });
+        action->setCheckable(true);
+        action->setData(family.colour);
+    }
     m_menu->addAction(tr("Tear Off to Desktop"), this, &NoteWindow::tearOffRequested);
     m_menu->addAction(tr("Put Away\tEsc"), this, [this] { pressPusher(AwayPusher); });
     m_menu->addSeparator();
@@ -240,6 +239,8 @@ NoteWindow::NoteWindow(QWidget *parent)
         cut->setEnabled(selection);
         copy->setEnabled(selection);
         remove->setEnabled(selection);
+        for (QAction *action : m_colourMenu->actions())
+            action->setChecked(action->data().value<QColor>() == m_colour);
     });
 
     const auto shortcut = [this](const QKeySequence &keys, auto &&slot) {
@@ -255,9 +256,29 @@ NoteWindow::NoteWindow(QWidget *parent)
         applyFont();
     });
 
+    m_colour = Theme::accent();
     loadSettings();
-    applyTheme();
+    applyColours();
     applyFont();
+}
+
+void NoteWindow::setSheetColour(const QColor &colour)
+{
+    m_colour = colour.isValid() ? colour : Theme::accent();
+    applyColours();
+    update();
+}
+
+void NoteWindow::nextColour()
+{
+    const QList<Theme::Family> &all = Theme::families();
+    int index = 0;
+    for (int i = 0; i < all.size(); ++i) {
+        if (all.at(i).colour == m_colour)
+            index = (i + 1) % int(all.size());
+    }
+    setSheetColour(all.at(index).colour);
+    emit colourChosen(m_colour);
 }
 
 NoteWindow::~NoteWindow()
@@ -455,49 +476,20 @@ void NoteWindow::turnToPlace(int index)
 // ---------------------------------------------------------------------------
 // Painting
 
-NoteWindow::Theme NoteWindow::theme() const
-{
-    Theme t;
-    t.dark = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
-    if (t.dark) {
-        t.rimTop = QColor(0x58, 0x3f, 0xb8);
-        t.rimBottom = QColor(0x22, 0x17, 0x5c);
-    } else {
-        t.rimTop = QColor(0x7d, 0x5c, 0xe8);
-        t.rimBottom = QColor(0x3b, 0x28, 0x91);
-    }
-    t.rimInk = QColor(0xfb, 0xf8, 0xff);
-    t.rimDim = QColor(0xfb, 0xf8, 0xff, 175);
-    t.lip = alpha(kCyan, t.dark ? 150 : 190);
-    if (!isActiveWindow()) {
-        t.rimTop = t.rimTop.darker(118);
-        t.rimBottom = t.rimBottom.darker(118);
-    }
-    return t;
-}
 
-void NoteWindow::applyTheme()
+
+void NoteWindow::applyColours()
 {
-    const bool dark = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
     NoteFace::Colors c;
-    if (dark) {
-        c.paper = QColor(0x2b, 0x27, 0x33);
-        c.paperEdge = QColor(0x21, 0x1e, 0x28);
-        c.ink = QColor(0xec, 0xe6, 0xf5);
-        c.rule = QColor(255, 255, 255, 20);
-        c.selection = alpha(kCyan, 70);
-        c.caret = kCyan;
-        c.control = QColor(0xec, 0xe6, 0xf5, 170);
-    } else {
-        c.paper = QColor(0xff, 0xf7, 0xdf);
-        c.paperEdge = QColor(0xf0, 0xe4, 0xc0);
-        c.ink = QColor(0x2a, 0x24, 0x33);
-        c.rule = QColor(0x3c, 0x50, 0xa0, 30);
-        c.selection = alpha(kCyan, 95);
-        c.caret = kViolet;
-        c.control = QColor(0x2a, 0x24, 0x33, 170);
-    }
-    c.controlHot = alpha(kViolet, 45);
+    c.paper = Theme::ground();
+    c.paperEdge = Theme::raised();
+    c.ink = Theme::textBody();
+    c.rule = Theme::hairline();
+    c.selection = Theme::withAlpha(m_colour, 52);
+    c.caret = m_colour;
+    c.control = Theme::textLabel();
+    c.controlHot = Theme::withAlpha(m_colour, 30);
+    c.bloom = Theme::withAlpha(m_colour, 22);
     m_face->setColors(c);
 }
 
@@ -505,61 +497,60 @@ void NoteWindow::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
-    const Theme t = theme();
     const QPointF c = center();
     const qreal r = m_radius;
+    const bool active = isActiveWindow();
 
     // A soft shadow, since a frameless window gets none of its own.
     QRadialGradient shadow(c + QPointF(0, 4), r + kMargin - 2);
-    const qreal edge = r / (r + kMargin - 2);
-    shadow.setColorAt(0, QColor(0, 0, 0, 70));
-    shadow.setColorAt(edge, QColor(0, 0, 0, 70));
+    shadow.setColorAt(r / (r + kMargin - 2), QColor(0, 0, 0, 110));
     shadow.setColorAt(1, QColor(0, 0, 0, 0));
     p.setPen(Qt::NoPen);
     p.setBrush(shadow);
     p.drawEllipse(c + QPointF(0, 4), r + kMargin - 2, r + kMargin - 2);
 
-    // The rim, lit from above.
-    QLinearGradient rim(c.x(), c.y() - r, c.x(), c.y() + r);
-    rim.setColorAt(0, t.rimTop);
-    rim.setColorAt(1, t.rimBottom);
-    p.setBrush(rim);
-    p.drawEllipse(c, r, r);
-
-    // Where the rim meets the paper, a thin line of the wormhole's glow.
+    // The rim is a raised surface; the colour is spent on light, not paint:
+    // a glow just outside it and a lit edge where it meets the face.
+    for (int i = 3; i >= 1; --i) {
+        p.setPen(QPen(Theme::withAlpha(m_colour, active ? 26 / i : 12 / i), 2.0 * i));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(c, r + i, r + i);
+    }
+    p.setPen(QPen(Theme::hairlineStrong(), 1));
+    p.setBrush(Theme::raised());
+    p.drawEllipse(c, r - 0.5, r - 0.5);
+    p.setPen(QPen(Theme::withAlpha(m_colour, active ? 210 : 120), 1.4));
     p.setBrush(Qt::NoBrush);
-    p.setPen(QPen(t.lip, 1.4));
     p.drawEllipse(c, faceRadius() + 0.7, faceRadius() + 0.7);
 
     // The place's name across the top of the rim, or the place the clip is
-    // being dragged to.
-    QFont font(QStringLiteral("Segoe UI Variable Text"));
-    font.setPixelSize(qMax(9, qRound(rimWidth() * 0.5)));
-    font.setWeight(QFont::DemiBold);
+    // being dragged to, as a house label.
+    const QFont font = Theme::labelFont(qMax(9.0, rimWidth() * 0.5));
     const QString name = m_clipDragging ? m_clipHint : windowTitle();
     // Centred left of noon, so it ends before the pushers begin.
     const qreal span = Round::radians(78);
-    Round::arcText(p, c, rimMid(), Round::kNoon - Round::radians(22),
-                   Round::fitArc(name, font, rimMid(), span), font, m_clipDragging ? t.rimInk : t.rimDim);
+    Round::arcText(p, c, rimMid(), Round::kNoon - Round::radians(26), Round::fitArc(name, font, rimMid(), span),
+                   font, m_clipDragging ? Theme::textPrimary() : Theme::textLabel());
 
     for (int i = 0; i < PusherCount; ++i)
-        drawPusher(p, Pusher(i), t);
-    drawRing(p, t);
+        drawPusher(p, Pusher(i));
+    drawRing(p);
 }
 
-void NoteWindow::drawPusher(QPainter &p, Pusher pusher, const Theme &t) const
+void NoteWindow::drawPusher(QPainter &p, Pusher pusher) const
 {
     const QPointF pc = pusherCenter(pusher);
     const qreal pr = pusherRadius();
     const bool hot = m_hoverPusher == pusher;
     const bool down = hot && m_pressedPusher == pusher;
 
-    p.setPen(Qt::NoPen);
-    p.setBrush(QColor(255, 255, 255, down ? 90 : hot ? 55 : 22));
+    p.setPen(QPen(hot ? Theme::hairlineStrong() : Theme::hairline(), 1));
+    p.setBrush(down ? Theme::withAlpha(m_colour, 52) : hot ? Theme::withAlpha(m_colour, 30) : Theme::ground());
     p.drawEllipse(pc, pr, pr);
 
     const qreal s = pr * 0.5;
-    p.setPen(QPen(t.rimInk, qMax(1.3, pr * 0.16), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    const QColor ink = hot ? m_colour : Theme::textLabel();
+    p.setPen(QPen(ink, qMax(1.3, pr * 0.16), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     p.setBrush(Qt::NoBrush);
     switch (pusher) {
     case NewPusher:
@@ -569,10 +560,16 @@ void NoteWindow::drawPusher(QPainter &p, Pusher pusher, const Theme &t) const
     case DeletePusher:
         p.drawLine(pc + QPointF(-s, 0), pc + QPointF(s, 0));
         break;
+    case ColourPusher:
+        // The sheet's colour itself, lit.
+        p.setPen(Qt::NoPen);
+        p.setBrush(m_colour);
+        p.drawEllipse(pc, s * 0.75, s * 0.75);
+        break;
     case AwayPusher:
         // A small circle shrinking into the hole it came from.
         p.drawEllipse(pc, s * 0.8, s * 0.8);
-        p.setBrush(t.rimInk);
+        p.setBrush(ink);
         p.drawEllipse(pc, s * 0.25, s * 0.25);
         break;
     case PusherCount:
@@ -580,18 +577,20 @@ void NoteWindow::drawPusher(QPainter &p, Pusher pusher, const Theme &t) const
     }
 }
 
-void NoteWindow::drawRing(QPainter &p, const Theme &t) const
+void NoteWindow::drawRing(QPainter &p) const
 {
     if (m_ring.size() < 2)
         return;
     const QPointF c = center();
 
-    // A notch on the rim for every open place, bright where there is writing.
+    // A notch on the rim for every open place, lit in its sheet's colour
+    // where something is written.
     for (int i = 0; i < m_ring.size(); ++i) {
+        const RingPlace &place = m_ring.at(i);
         const QPointF at = Round::polar(c, m_radius - 3, placeAngle(i));
         p.setPen(Qt::NoPen);
-        p.setBrush(m_ring.at(i).written ? kCyan : t.rimDim);
-        const qreal dot = m_ring.at(i).written ? 2.2 : 1.5;
+        p.setBrush(place.written ? (place.colour.isValid() ? place.colour : Theme::accent()) : Theme::hairlineStrong());
+        const qreal dot = place.written ? 2.2 : 1.6;
         p.drawEllipse(at, dot, dot);
     }
 
@@ -602,24 +601,18 @@ void NoteWindow::drawRing(QPainter &p, const Theme &t) const
     p.translate(Round::polar(c, m_radius, a));
     p.rotate(Round::degrees(a) + 90);
 
-    // The wire handles, folded back out past the rim, behind the body.
-    const QColor steel(0xd4, 0xd8, 0xe0);
+    // The wire handles, folded back out past the rim, behind the body; lit in
+    // the sheet's colour while the clip is being turned.
     p.setBrush(Qt::NoBrush);
-    p.setPen(QPen(QColor(0, 0, 0, 90), 2.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setPen(QPen(m_clipDragging ? m_colour : Theme::textLabel(), 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     QPainterPath wire;
     wire.moveTo(-7, -6);
     wire.cubicTo(-9, -16, 9, -16, 7, -6);
     p.drawPath(wire);
-    p.setPen(QPen(m_clipDragging ? steel.lighter(115) : steel, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    p.drawPath(wire);
 
-    // The black jaw, gripping the rim: wide where it bites, narrower inside.
-    QLinearGradient body(-12, 0, 12, 0);
-    body.setColorAt(0, QColor(0x18, 0x18, 0x1c));
-    body.setColorAt(0.45, QColor(0x4a, 0x4a, 0x52));
-    body.setColorAt(1, QColor(0x10, 0x10, 0x14));
-    p.setPen(QPen(QColor(0, 0, 0, 160), 0.8));
-    p.setBrush(body);
+    // The jaw, gripping the rim: wide where it bites, narrower inside.
+    p.setPen(QPen(Theme::hairlineStrong(), 1));
+    p.setBrush(Theme::pressed());
     QPainterPath jaw;
     jaw.moveTo(-12, -7);
     jaw.lineTo(12, -7);
@@ -627,8 +620,7 @@ void NoteWindow::drawRing(QPainter &p, const Theme &t) const
     jaw.lineTo(-8, 4);
     jaw.closeSubpath();
     p.drawPath(jaw);
-    // The steel band where the handles hinge.
-    p.setPen(QPen(steel, 1.2, Qt::SolidLine, Qt::RoundCap));
+    p.setPen(QPen(Theme::withAlpha(m_colour, 150), 1.2, Qt::SolidLine, Qt::RoundCap));
     p.drawLine(QPointF(-11, -6), QPointF(11, -6));
     p.restore();
 }
@@ -710,7 +702,7 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
         unsetCursor();
     }
     if (zone == Zone::Pusher) {
-        static const char *const tips[] = { "New sheet", "Delete this sheet", "Put away" };
+        static const char *const tips[] = { "New sheet", "Delete this sheet", "Ring colour", "Put away" };
         setToolTip(tr(tips[index]));
     } else if (zone == Zone::Clip && !m_ring.isEmpty()) {
         setToolTip(tr("Turn to another place"));
@@ -832,6 +824,9 @@ void NoteWindow::pressPusher(Pusher pusher)
     case DeletePusher:
         confirmDelete();
         break;
+    case ColourPusher:
+        nextColour();
+        break;
     case AwayPusher:
         emit putAwayRequested();
         break;
@@ -861,7 +856,7 @@ void NoteWindow::about()
 
 void NoteWindow::ask(const QString &question, const QString &yes, const QString &no, std::function<void(bool)> answer)
 {
-    m_band->open(question, yes, no, std::move(answer), theme().dark);
+    m_band->open(question, yes, no, std::move(answer), m_colour);
 }
 
 bool NoteWindow::asking() const
@@ -879,9 +874,7 @@ void NoteWindow::zoomBy(int steps)
 // the letters bigger.
 void NoteWindow::applyFont()
 {
-    QFont font(QStringLiteral("Segoe UI Variable Text"));
-    font.setPointSizeF(11.0 * m_zoom / 100.0);
-    m_face->setTextFont(font);
+    m_face->setTextFont(Theme::bodyFont(15.0 * m_zoom / 100.0));
 }
 
 void NoteWindow::loadSettings()

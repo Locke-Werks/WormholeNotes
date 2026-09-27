@@ -49,6 +49,8 @@ private:
     void leaveSheet();
     void updateRing();
     void updateHole();
+    // A place's colour on the ring and in its hole: its first written sheet's.
+    QColor placeColour(const QString &key) const;
 
     // Notes torn off onto the desktop.
     bool isDesk(const QString &key) const;

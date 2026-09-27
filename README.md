@@ -29,7 +29,7 @@ the new window with that place's notes behind it.
 | Drag the hole | It moves; this place remembers where |
 | Drag the binder clip round the rim, or scroll over the rim | The note turns to another open place |
 | The arrows in the middle of the note | The next or previous page, then sheet; past the last, a new sheet |
-| The pushers on the rim: plus, minus, dot | New sheet, delete sheet, put away |
+| The pushers on the rim: plus, minus, colour, dot | New sheet, delete sheet, the sheet's ring colour, put away |
 | Escape, or switch apps | The note folds back into the hole |
 | Right-click the note | Edit commands, About, Quit |
 | Drag the rim, or its outer edge | The note moves, or the circle resizes |
@@ -43,6 +43,11 @@ in towards the middle, like a record. A new paragraph leaves a dot in the
 groove rather than breaking it. When the spiral reaches the middle the page
 is full and the next one starts again at the rim. Up and Down move a turn out
 or in.
+
+Each sheet has a ring colour, one of the six house colours: cyan, violet,
+blue, magenta, crimson or ember. It lights the rim, the caret and the hole,
+and marks the place's notch on the ring. The colour pusher steps through
+them; the right-click menu has them by name.
 
 A place can hold several sheets, one thought each. Blank sheets are never
 kept and close with their page.

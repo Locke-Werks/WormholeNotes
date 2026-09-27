@@ -17,6 +17,7 @@ struct RingPlace
     QString key;
     QString label;
     bool written = false; // has a sheet with something on it
+    QColor colour;        // its first written sheet's ring colour
 };
 
 // The note: a round, frameless window with a paper face and a rim. The rim
@@ -40,6 +41,8 @@ public:
     void setSheet(const QString &label, const QString &text, int index, int count, bool fromEnd = false);
     // The open places, and which one the clip is on.
     void setRing(const QList<RingPlace> &places, int current);
+    // The sheet's ring colour, which lights the rim, the bloom and the caret.
+    void setSheetColour(const QColor &colour);
     QString text() const;
     // Opens the circle centred on a point in logical screen coordinates,
     // pulled in as far as needed to stay on that screen.
@@ -59,6 +62,7 @@ Q_SIGNALS:
     void newSheetRequested();
     void deleteSheetRequested();
     void tearOffRequested();
+    void colourChosen(const QColor &colour);
     // The user finished dragging the note by its rim.
     void moved();
 
@@ -76,14 +80,9 @@ protected:
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 
 private:
-    enum Pusher { NewPusher, DeletePusher, AwayPusher, PusherCount };
+    enum Pusher { NewPusher, DeletePusher, ColourPusher, AwayPusher, PusherCount };
     enum class Zone { Outside, Face, Rim, Edge, Pusher, Clip };
 
-    struct Theme
-    {
-        QColor rimTop, rimBottom, rimInk, rimDim, lip;
-        bool dark = false;
-    };
 
     // Geometry, all from the radius.
     QPointF center() const;
@@ -103,10 +102,10 @@ private:
     int nearestPlace(qreal angle) const;
     void turnToPlace(int index);
 
-    Theme theme() const;
-    void applyTheme();
-    void drawPusher(QPainter &p, Pusher pusher, const Theme &t) const;
-    void drawRing(QPainter &p, const Theme &t) const;
+    void applyColours();
+    void drawPusher(QPainter &p, Pusher pusher) const;
+    void drawRing(QPainter &p) const;
+    void nextColour();
 
     void pressPusher(Pusher pusher);
     void confirmDelete();
@@ -124,6 +123,8 @@ private:
     NoteFace *m_face = nullptr;
     ConfirmBand *m_band = nullptr;
     QMenu *m_menu = nullptr;
+    QMenu *m_colourMenu = nullptr;
+    QColor m_colour;
 
     int m_radius = 210;
     int m_restoreRadius = 210;

@@ -1,4 +1,5 @@
 #include "NativeHost.h"
+#include "Theme.h"
 #include "Wormhole.h"
 
 #include <QApplication>
@@ -33,6 +34,8 @@ int main(int argc, char *argv[])
     // The note hides rather than closes, and the hole is never the last
     // window in any sense that matters. Quitting is explicit.
     QApplication::setQuitOnLastWindowClosed(false);
+    Theme::loadFonts();
+    app.setStyleSheet(Theme::styleSheet());
 
     Wormhole wormhole;
     wormhole.start();

@@ -65,7 +65,16 @@ int main(int argc, char *argv[])
         const QStringList sheets = store.place(QStringLiteral("claude.exe")).sheets;
         check(sheets == (QStringList{ QStringLiteral("old note"), QStringLiteral("new thought") }),
               "format 2 round-trips the sheets");
+        store.setColour(QStringLiteral("claude.exe"), 1, QStringLiteral("#ff2d95"));
+        store.flush();
+        SheetStore reread;
+        reread.load();
+        check(reread.place(QStringLiteral("claude.exe")).colours
+                  == (QStringList{ QString(), QStringLiteral("#ff2d95") }),
+              "a sheet keeps its ring colour, and one never set stays the default");
         store.removeSheet(QStringLiteral("claude.exe"), 0);
+        check(store.place(QStringLiteral("claude.exe")).colours == QStringList{ QStringLiteral("#ff2d95") },
+              "the colour goes with its sheet when another is deleted");
         check(store.place(QStringLiteral("claude.exe")).sheets == QStringList{ QStringLiteral("new thought") },
               "a sheet can be deleted");
     }

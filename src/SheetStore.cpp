@@ -12,8 +12,9 @@
 
 namespace {
 
-// 1 held one text per place; 2 holds a list of sheets.
-constexpr int kFormat = 2;
+// 1 held one text per place; 2 a list of sheets; 3 a list of sheets, each
+// with its ring colour.
+constexpr int kFormat = 3;
 // In the title bar, left of where the caption buttons usually end.
 const QPointF kDefaultHole(170, 18);
 
@@ -68,12 +69,19 @@ void SheetStore::load()
         const QJsonObject o = it.value().toObject();
         PlaceRecord record;
         record.label = o.value(QStringLiteral("label")).toString();
-        if (format >= 2) {
+        if (format >= 3) {
+            for (const QJsonValue &sheet : o.value(QStringLiteral("sheets")).toArray()) {
+                record.sheets.append(sheet.toObject().value(QStringLiteral("text")).toString());
+                record.colours.append(sheet.toObject().value(QStringLiteral("colour")).toString());
+            }
+        } else if (format == 2) {
             for (const QJsonValue &sheet : o.value(QStringLiteral("sheets")).toArray())
                 record.sheets.append(sheet.toString());
         } else {
             record.sheets.append(o.value(QStringLiteral("text")).toString());
         }
+        while (record.colours.size() < record.sheets.size())
+            record.colours.append(QString());
         const QJsonArray hole = o.value(QStringLiteral("hole")).toArray();
         if (hole.size() == 2) {
             record.hole = QPointF(hole.at(0).toDouble(), hole.at(1).toDouble());
@@ -98,9 +106,14 @@ void SheetStore::flush()
     for (auto it = m_places.cbegin(); it != m_places.cend(); ++it) {
         const PlaceRecord &record = it.value();
         QJsonArray sheets;
-        for (const QString &sheet : record.sheets) {
-            if (!blank(sheet))
-                sheets.append(sheet);
+        for (int i = 0; i < record.sheets.size(); ++i) {
+            if (blank(record.sheets.at(i)))
+                continue;
+            QJsonObject sheet;
+            sheet.insert(QStringLiteral("text"), record.sheets.at(i));
+            if (!record.colours.value(i).isEmpty())
+                sheet.insert(QStringLiteral("colour"), record.colours.at(i));
+            sheets.append(sheet);
         }
         // Nothing written and the hole where new places put one anyway:
         // nothing worth keeping. A desk note is nothing but its writing.
@@ -136,6 +149,8 @@ PlaceRecord SheetStore::place(const QString &key) const
         record.hole = m_lastHole;
     if (record.sheets.isEmpty())
         record.sheets.append(QString());
+    while (record.colours.size() < record.sheets.size())
+        record.colours.append(QString());
     return record;
 }
 
@@ -144,10 +159,25 @@ void SheetStore::setSheet(const QString &key, const QString &label, int index, c
     PlaceRecord &record = m_places[key];
     while (record.sheets.size() <= index)
         record.sheets.append(QString());
+    while (record.colours.size() < record.sheets.size())
+        record.colours.append(QString());
     if (record.sheets.at(index) == text && record.label == label)
         return;
     record.sheets[index] = text;
     record.label = label;
+    touch();
+}
+
+void SheetStore::setColour(const QString &key, int index, const QString &colour)
+{
+    PlaceRecord &record = m_places[key];
+    while (record.sheets.size() <= index)
+        record.sheets.append(QString());
+    while (record.colours.size() < record.sheets.size())
+        record.colours.append(QString());
+    if (record.colours.at(index) == colour)
+        return;
+    record.colours[index] = colour;
     touch();
 }
 
@@ -156,7 +186,10 @@ int SheetStore::addSheet(const QString &key, const QString &label)
     PlaceRecord &record = m_places[key];
     if (record.sheets.isEmpty())
         record.sheets.append(QString());
+    while (record.colours.size() < record.sheets.size())
+        record.colours.append(QString());
     record.sheets.append(QString());
+    record.colours.append(QString());
     record.label = label;
     return int(record.sheets.size()) - 1;
 }
@@ -167,6 +200,8 @@ void SheetStore::removeSheet(const QString &key, int index)
     if (it == m_places.end() || index < 0 || index >= it->sheets.size())
         return;
     it->sheets.removeAt(index);
+    if (index < it->colours.size())
+        it->colours.removeAt(index);
     touch();
 }
 
@@ -184,16 +219,25 @@ void SheetStore::dropBlanks(const QString &key)
     auto it = m_places.find(key);
     if (it == m_places.end())
         return;
-    it->sheets.removeIf(blank);
+    for (int i = int(it->sheets.size()) - 1; i >= 0; --i) {
+        if (blank(it->sheets.at(i))) {
+            it->sheets.removeAt(i);
+            if (i < it->colours.size())
+                it->colours.removeAt(i);
+        }
+    }
     if (it->sheets.isEmpty() && !it->hasHole)
         m_places.erase(it);
 }
 
-QString SheetStore::newDeskNote(const QStringList &sheets, const QPoint &at)
+QString SheetStore::newDeskNote(const QStringList &sheets, const QPoint &at, const QStringList &colours)
 {
     const QString key = QStringLiteral("desk:") + QUuid::createUuid().toString(QUuid::WithoutBraces);
     PlaceRecord &record = m_places[key];
     record.sheets = sheets;
+    record.colours = colours;
+    while (record.colours.size() < record.sheets.size())
+        record.colours.append(QString());
     record.desk = at;
     record.onDesk = true;
     touch();

@@ -3,6 +3,7 @@
 #include "DeskNote.h"
 #include "HoleWindow.h"
 #include "NoteWindow.h"
+#include "Theme.h"
 
 #include <QApplication>
 #include <QMenu>
@@ -36,6 +37,13 @@ Wormhole::Wormhole(QObject *parent)
     connect(m_note, &NoteWindow::placeTurned, this, &Wormhole::turnPlace);
     connect(m_note, &NoteWindow::tearOffRequested, this, &Wormhole::tearOff);
     connect(m_note, &NoteWindow::moved, this, &Wormhole::onNoteMoved);
+    connect(m_note, &NoteWindow::colourChosen, this, [this](const QColor &colour) {
+        m_store.setColour(m_viewKey, m_sheet, colour == Theme::accent() ? QString() : colour.name());
+        updateRing();
+        updateHole();
+        if (DeskNote *desk = m_desk.value(m_viewKey))
+            desk->setColour(placeColour(m_viewKey));
+    });
     connect(m_note, &NoteWindow::textEdited, this, [this](const QString &text) {
         const bool wasWritten = m_store.place(m_viewKey).hasWriting();
         m_store.setSheet(m_viewKey, m_viewLabel, m_sheet, text);
@@ -105,6 +113,17 @@ void Wormhole::onPlaceClosed(const QString &key)
 void Wormhole::updateHole()
 {
     m_hole->setFilled(m_store.place(m_place.key).hasWriting());
+    m_hole->setColour(placeColour(m_place.key));
+}
+
+QColor Wormhole::placeColour(const QString &key) const
+{
+    const PlaceRecord record = m_store.place(key);
+    for (int i = 0; i < record.sheets.size(); ++i) {
+        if (!record.sheets.at(i).trimmed().isEmpty())
+            return Theme::sheetColour(record.colours.value(i));
+    }
+    return Theme::sheetColour(record.colours.value(0));
 }
 
 void Wormhole::reposition()
@@ -151,6 +170,7 @@ void Wormhole::showSheet(int index, bool fromEnd)
     m_sheet = qBound(0, index, int(record.sheets.size()) - 1);
     m_lastSheet.insert(m_viewKey, m_sheet);
     m_note->setSheet(m_viewLabel, record.sheets.at(m_sheet), m_sheet, int(record.sheets.size()), fromEnd);
+    m_note->setSheetColour(Theme::sheetColour(record.colours.value(m_sheet)));
 }
 
 void Wormhole::leaveSheet()
@@ -217,13 +237,13 @@ void Wormhole::updateRing()
     for (const Place &place : m_tracker.openPlaces()) {
         if (place.key == m_viewKey)
             current = int(ring.size());
-        ring.append({ place.key, place.label, m_store.place(place.key).hasWriting() });
+        ring.append({ place.key, place.label, m_store.place(place.key).hasWriting(), placeColour(place.key) });
         // Desk notes are on the desktop, so they follow it round the ring.
         if (place.isDesktop()) {
             for (const QString &key : m_store.deskKeys()) {
                 if (key == m_viewKey)
                     current = int(ring.size());
-                ring.append({ key, deskLabel(key), true });
+                ring.append({ key, deskLabel(key), true, placeColour(key) });
             }
         }
     }
@@ -271,6 +291,7 @@ void Wormhole::createDeskNote(const QString &key)
     auto *desk = new DeskNote;
     const PlaceRecord record = m_store.place(key);
     desk->setText(record.sheets.constFirst());
+    desk->setColour(placeColour(key));
     desk->centerOn(record.desk);
     connect(desk, &DeskNote::clicked, this, [this, key] { openDeskNote(key); });
     connect(desk, &DeskNote::dropped, this, [this, key] { onDeskNoteDropped(key); });
@@ -302,6 +323,7 @@ void Wormhole::settleDesk(const QString &key)
         return;
     }
     desk->setText(record.sheets.constFirst());
+    desk->setColour(placeColour(key));
     desk->show();
 }
 
@@ -318,14 +340,16 @@ void Wormhole::onDeskNoteDropped(const QString &key)
         return;
     }
     // Dropped on a window: its writing joins that place's sheets.
-    for (const QString &sheet : m_store.place(key).sheets) {
-        if (sheet.trimmed().isEmpty())
+    const PlaceRecord dropped = m_store.place(key);
+    for (int i = 0; i < dropped.sheets.size(); ++i) {
+        if (dropped.sheets.at(i).trimmed().isEmpty())
             continue;
         const PlaceRecord there = m_store.place(target.key);
         const int index = there.sheets.size() == 1 && there.sheets.constFirst().trimmed().isEmpty()
             ? 0
             : m_store.addSheet(target.key, target.label);
-        m_store.setSheet(target.key, target.label, index, sheet);
+        m_store.setSheet(target.key, target.label, index, dropped.sheets.at(i));
+        m_store.setColour(target.key, index, dropped.colours.value(i));
     }
     m_store.forget(key);
     m_desk.remove(key);
@@ -342,7 +366,7 @@ void Wormhole::tearOff()
     if (text.trimmed().isEmpty())
         return;
     const QPoint at = m_note->geometry().center();
-    const QString key = m_store.newDeskNote({ text }, at);
+    const QString key = m_store.newDeskNote({ text }, at, { m_store.place(m_viewKey).colours.value(m_sheet) });
     // The sheet leaves the page, which is left with a fresh blank if that
     // was its only one.
     m_store.removeSheet(m_viewKey, m_sheet);

@@ -22,7 +22,7 @@ class NoteFace : public QWidget
 public:
     struct Colors
     {
-        QColor paper, paperEdge, ink, rule, selection, caret, control, controlHot;
+        QColor paper, paperEdge, ink, rule, selection, caret, control, controlHot, bloom;
     };
 
     explicit NoteFace(QWidget *parent = nullptr);

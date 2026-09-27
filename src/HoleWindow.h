@@ -15,6 +15,8 @@ public:
 
     // A hole with writing behind it looks deeper than an empty one.
     void setFilled(bool filled);
+    // The colour it glows with when there is writing behind it.
+    void setColour(const QColor &colour);
     bool isDragging() const { return m_dragging; }
 
     // Centre the hole on a point in physical screen pixels, keeping it on top
@@ -37,6 +39,7 @@ protected:
 
 private:
     bool m_filled = false;
+    QColor m_colour;
     bool m_hover = false;
     bool m_pressed = false;
     bool m_dragging = false;

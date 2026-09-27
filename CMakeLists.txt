@@ -31,6 +31,8 @@ set(WORMHOLENOTES_SOURCES
     src/NoteWindow.h
     src/NoteFace.cpp
     src/NoteFace.h
+    src/Theme.cpp
+    src/Theme.h
     src/SpiralLayout.cpp
     src/SpiralLayout.h
     src/Round.cpp
@@ -52,6 +54,16 @@ qt_add_resources(WormholeNotes "icons"
     FILES assets/wormholenotes.ico
 )
 
+# The house faces, the same files AutoPM ships, all under the SIL Open Font
+# License.
+set(HOUSE_FONTS
+    assets/fonts/ChakraPetch-SemiBold.ttf
+    assets/fonts/ChakraPetch-Medium.ttf
+    assets/fonts/InstrumentSerif-Regular.ttf
+    assets/fonts/Outfit-Variable.ttf
+)
+qt_add_resources(WormholeNotes "fonts" PREFIX "/" BASE assets FILES ${HOUSE_FONTS})
+
 target_compile_definitions(WormholeNotes PRIVATE
     WORMHOLENOTES_VERSION="${PROJECT_VERSION}"
 )
@@ -70,6 +82,8 @@ target_link_libraries(WormholeNotes PRIVATE Qt6::Widgets Qt6::Network dwmapi ole
 install(TARGETS WormholeNotes RUNTIME DESTINATION .)
 # The browser extension, for loading unpacked until it is in a store.
 install(DIRECTORY extension/ DESTINATION extension)
+# The OFL asks for its text to travel with the fonts.
+install(FILES assets/fonts/OFL-ChakraPetch.txt assets/fonts/OFL-InstrumentSerif.txt assets/fonts/OFL-Outfit.txt DESTINATION licenses)
 
 enable_testing()
 qt_add_executable(wormhole-store-test tests/store.cpp src/SheetStore.cpp src/SheetStore.h)
@@ -102,9 +116,12 @@ qt_add_executable(wormhole-render
     src/NoteWindow.h
     src/NoteFace.cpp
     src/NoteFace.h
+    src/Theme.cpp
+    src/Theme.h
     src/SpiralLayout.cpp
     src/SpiralLayout.h
     src/Round.cpp
     src/Round.h
 )
+qt_add_resources(wormhole-render "fonts" PREFIX "/" BASE assets FILES ${HOUSE_FONTS})
 target_link_libraries(wormhole-render PRIVATE Qt6::Widgets)

@@ -1,5 +1,7 @@
 #include "DeskNote.h"
 
+#include "Theme.h"
+
 #include <QApplication>
 #include <QGuiApplication>
 #include <QMouseEvent>
@@ -29,9 +31,8 @@ DeskNote::DeskNote(QWidget *parent)
     setFixedSize(2 * (kRadius + kMargin), 2 * (kRadius + kMargin));
     setCursor(Qt::PointingHandCursor);
 
-    QFont font(QStringLiteral("Segoe UI Variable Text"));
-    font.setPixelSize(10);
-    m_layout.setFont(font);
+    m_layout.setFont(Theme::bodyFont(10));
+    m_colour = Theme::accent();
     m_layout.setDiameter(2 * (kRadius - kRim));
 }
 
@@ -40,6 +41,12 @@ void DeskNote::setText(const QString &text)
     m_doc.setPlainText(text);
     m_layout.layout(&m_doc);
     setToolTip(text.left(200));
+    update();
+}
+
+void DeskNote::setColour(const QColor &colour)
+{
+    m_colour = colour;
     update();
 }
 
@@ -75,33 +82,35 @@ void DeskNote::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
-    const bool dark = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
     const QPointF c(width() / 2.0, height() / 2.0);
 
     QRadialGradient shadow(c + QPointF(0, 2), kRadius + kMargin - 1);
-    shadow.setColorAt(qreal(kRadius) / (kRadius + kMargin - 1), QColor(0, 0, 0, 60));
+    shadow.setColorAt(qreal(kRadius) / (kRadius + kMargin - 1), QColor(0, 0, 0, 90));
     shadow.setColorAt(1, QColor(0, 0, 0, 0));
     p.setPen(Qt::NoPen);
     p.setBrush(shadow);
     p.drawEllipse(c + QPointF(0, 2), kRadius + kMargin - 1, kRadius + kMargin - 1);
 
-    QLinearGradient rim(c.x(), c.y() - kRadius, c.x(), c.y() + kRadius);
-    rim.setColorAt(0, QColor(0x7d, 0x5c, 0xe8));
-    rim.setColorAt(1, QColor(0x3b, 0x28, 0x91));
-    p.setBrush(rim);
+    // The same rim as the note, small: raised, hairline-edged, lit inside in
+    // the sheet's colour.
+    p.setPen(QPen(Theme::hairlineStrong(), 1));
+    p.setBrush(Theme::raised());
     p.drawEllipse(c, kRadius, kRadius);
-
     const qreal face = kRadius - kRim;
-    p.setBrush(dark ? QColor(0x2b, 0x27, 0x33) : QColor(0xff, 0xf7, 0xdf));
+    p.setPen(QPen(Theme::withAlpha(m_colour, 190), 1.2));
+    p.setBrush(Theme::ground());
     p.drawEllipse(c, face, face);
 
     // The first page of the writing, small, clipped to the card.
     QPainterPath circle;
     circle.addEllipse(c, face, face);
     p.setClipPath(circle);
+    QRadialGradient bloom(c.x(), c.y() - face * 1.2, face * 1.4);
+    bloom.setColorAt(0, Theme::withAlpha(m_colour, 30));
+    bloom.setColorAt(1, Theme::withAlpha(m_colour, 0));
+    p.fillRect(QRectF(c.x() - face, c.y() - face, 2 * face, 2 * face), bloom);
     p.translate(c - QPointF(face, face));
-    m_layout.draw(p, 0, dark ? QColor(0xec, 0xe6, 0xf5) : QColor(0x2a, 0x24, 0x33), Qt::transparent,
-                  QColor(0x6b, 0x3f, 0xd6), 0, 0);
+    m_layout.draw(p, 0, Theme::textBody(), Qt::transparent, m_colour, 0, 0);
 }
 
 void DeskNote::mousePressEvent(QMouseEvent *event)
