@@ -319,7 +319,16 @@ QString SheetStore::exportMarkdown(const std::function<QString(const QString &ke
             if (blank(sheet))
                 continue;
             out += shown++ ? QStringLiteral("\n---\n\n") : QStringLiteral("\n");
-            out += sheet.trimmed() + u'\n';
+            // A sheet's line breaks are single newlines, which Markdown would
+            // run together, so each becomes a hard break (two trailing spaces).
+            QStringList lines = sheet.trimmed().split(u'\n');
+            for (int i = 0; i < lines.size(); ++i) {
+                QString line = lines.at(i);
+                while (line.endsWith(u' ') || line.endsWith(u'\t') || line.endsWith(u'\r'))
+                    line.chop(1);
+                const bool breaks = i + 1 < lines.size() && !line.isEmpty() && !lines.at(i + 1).trimmed().isEmpty();
+                out += line + (breaks ? QStringLiteral("  \n") : QStringLiteral("\n"));
+            }
         }
     };
     for (const Entry &entry : std::as_const(places))

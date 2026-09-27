@@ -107,6 +107,9 @@ int main(int argc, char *argv[])
         check(md.contains(QStringLiteral("## Notepad")) && md.contains(QStringLiteral("first thought"))
                   && md.contains(QStringLiteral("second thought")),
               "the export has a section per place with its sheets");
+        store.setSheet(QStringLiteral("notepad.exe"), QStringLiteral("Notepad"), 0, QStringLiteral("line one \nline two"));
+        check(store.exportMarkdown([](const QString &key) { return key; }).contains(QStringLiteral("line one  \nline two\n")),
+              "a sheet's line breaks survive as Markdown hard breaks");
 
         QDir(store.backupDirectory()).removeRecursively();
         const QDate day(2026, 9, 1);
