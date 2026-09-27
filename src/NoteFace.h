@@ -42,6 +42,8 @@ public:
     // Which sheet this is among its place's sheets, for the controls in the
     // middle. Turning past the first or last page asks for the next sheet.
     void setSheetMarker(int index, int count);
+    // Selects a stretch of the writing, turning the face to bring it up.
+    void selectRange(int start, int length);
     bool canTurn(int direction) const;
     void turn(int direction);
 

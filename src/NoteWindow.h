@@ -41,6 +41,8 @@ public:
     void setSheet(const QString &label, const QString &text, int index, int count);
     // The open places, and which one the clip is on.
     void setRing(const QList<RingPlace> &places, int current);
+    // Selects a stretch of the sheet, as a search hit.
+    void selectRange(int start, int length);
     // The sheet's ring colour, which lights the rim, the bloom and the caret.
     void setSheetColour(const QColor &colour);
     QString text() const;

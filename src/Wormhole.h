@@ -9,6 +9,8 @@
 class DeskNote;
 class HoleWindow;
 class NoteWindow;
+class SearchWindow;
+struct SearchHit;
 class TearTarget;
 class QAction;
 class QSystemTrayIcon;
@@ -73,6 +75,11 @@ private:
     // until the user moves on to another app.
     void showDeskNotes(bool shown);
 
+    // Search across every sheet.
+    void runSearch(const QString &query);
+    void openHit(const SearchHit &hit);
+    QString placeLabel(const QString &key) const;
+
     PlaceTracker m_tracker;
     ExtensionLink m_extension;
     SheetStore m_store;
@@ -85,6 +92,7 @@ private:
     HoleWindow *m_hole = nullptr;
     NoteWindow *m_note = nullptr;
     TearTarget *m_target = nullptr;
+    SearchWindow *m_search = nullptr;
     QSystemTrayIcon *m_tray = nullptr;
     QAction *m_showDesk = nullptr;
     bool m_deskShown = false;

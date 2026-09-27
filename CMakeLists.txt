@@ -27,6 +27,8 @@ set(WORMHOLENOTES_SOURCES
     src/DeskNote.h
     src/TearTarget.cpp
     src/TearTarget.h
+    src/SearchWindow.cpp
+    src/SearchWindow.h
     src/NativeHost.cpp
     src/NativeHost.h
     src/NoteWindow.cpp

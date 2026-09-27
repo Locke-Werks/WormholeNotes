@@ -61,6 +61,8 @@ public:
     QString newDeskNote(const QStringList &sheets, const QPoint &at, const QStringList &colours = {});
     void setDesk(const QString &key, const QPoint &at);
     QStringList deskKeys() const;
+    // Every place with a record, desk notes included.
+    QStringList keys() const;
     void forget(const QString &key);
 
     // Where a place that has never had a hole gets one: where the last hole

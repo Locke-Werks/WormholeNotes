@@ -98,6 +98,15 @@ void NoteFace::load(const QString &text)
     update();
 }
 
+void NoteFace::selectRange(int start, int length)
+{
+    const int end = m_doc->characterCount() - 1;
+    m_cursor.setPosition(qBound(0, start, end));
+    m_cursor.setPosition(qBound(0, start + length, end), QTextCursor::KeepAnchor);
+    m_hasGoal = false;
+    cursorMoved();
+}
+
 void NoteFace::setSheetMarker(int index, int count)
 {
     m_sheetIndex = index;

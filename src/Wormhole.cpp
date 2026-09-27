@@ -3,6 +3,7 @@
 #include "DeskNote.h"
 #include "HoleWindow.h"
 #include "NoteWindow.h"
+#include "SearchWindow.h"
 #include "TearTarget.h"
 #include "Theme.h"
 
@@ -24,6 +25,9 @@ Wormhole::Wormhole(QObject *parent)
     m_hole = new HoleWindow;
     m_note = new NoteWindow;
     m_target = new TearTarget;
+    m_search = new SearchWindow;
+    connect(m_search, &SearchWindow::queryChanged, this, &Wormhole::runSearch);
+    connect(m_search, &SearchWindow::chosen, this, &Wormhole::openHit);
 
     connect(&m_tracker, &PlaceTracker::placeChanged, this, &Wormhole::onPlaceChanged);
     connect(&m_tracker, &PlaceTracker::anchorMoved, this, &Wormhole::reposition);
@@ -75,6 +79,11 @@ Wormhole::Wormhole(QObject *parent)
     m_tray->setToolTip(QStringLiteral("WormholeNotes"));
     auto *menu = new QMenu;
     menu->addAction(tr("Open Note"), this, &Wormhole::openNote);
+    menu->addAction(tr("Find in Notes..."), this, [this] {
+        putNoteAway();
+        const QScreen *screen = QGuiApplication::screenAt(QCursor::pos());
+        m_search->openAt((screen ? screen : QGuiApplication::primaryScreen())->availableGeometry().center());
+    });
     m_showDesk = menu->addAction(tr("Show Desk Notes"));
     m_showDesk->setCheckable(true);
     connect(m_showDesk, &QAction::triggered, this, &Wormhole::showDeskNotes);
@@ -96,6 +105,7 @@ Wormhole::~Wormhole()
     m_store.flush();
     qDeleteAll(m_desk);
     delete m_target;
+    delete m_search;
     delete m_tray->contextMenu();
     delete m_note;
     delete m_hole;
@@ -385,6 +395,73 @@ void Wormhole::onDeskNoteDropped(const QString &key)
     desk->deleteLater();
     if (target.key == m_place.key)
         updateHole();
+}
+
+QString Wormhole::placeLabel(const QString &key) const
+{
+    if (isDesk(key))
+        return deskLabel(key);
+    for (const Place &place : m_tracker.openPlaces()) {
+        if (place.key == key)
+            return place.label;
+    }
+    const QString stored = m_store.place(key).label;
+    return stored.isEmpty() ? key.section(u'|', -1) : stored;
+}
+
+void Wormhole::runSearch(const QString &query)
+{
+    const QString needle = query.trimmed();
+    QList<SearchHit> hits;
+    if (needle.isEmpty()) {
+        m_search->setHits(hits);
+        return;
+    }
+    // The place in front first, then the rest by name.
+    QStringList keys = m_store.keys();
+    std::sort(keys.begin(), keys.end(), [this](const QString &a, const QString &b) {
+        if ((a == m_place.key) != (b == m_place.key))
+            return a == m_place.key;
+        return placeLabel(a).compare(placeLabel(b), Qt::CaseInsensitive) < 0;
+    });
+    for (const QString &key : std::as_const(keys)) {
+        const PlaceRecord record = m_store.place(key);
+        const QString label = placeLabel(key);
+        for (int sheet = 0; sheet < record.sheets.size(); ++sheet) {
+            const QString &text = record.sheets.at(sheet);
+            int perSheet = 0;
+            for (qsizetype at = text.indexOf(needle, 0, Qt::CaseInsensitive); at >= 0 && perSheet < 3;
+                 at = text.indexOf(needle, at + needle.size(), Qt::CaseInsensitive), ++perSheet) {
+                SearchHit hit;
+                hit.key = key;
+                hit.label = label;
+                hit.sheet = sheet;
+                hit.start = int(at);
+                hit.length = int(needle.size());
+                const qsizetype from = qMax<qsizetype>(0, at - 60);
+                hit.before = text.mid(from, at - from).replace(u'\n', u' ');
+                hit.match = text.mid(at, needle.size());
+                hit.after = text.mid(at + needle.size(), 60).replace(u'\n', u' ');
+                hit.colour = Theme::sheetColour(record.colours.value(sheet));
+                hits.append(hit);
+            }
+        }
+    }
+    m_search->setHits(hits);
+}
+
+void Wormhole::openHit(const SearchHit &hit)
+{
+    const QPoint center = m_search->geometry().center();
+    if (isDesk(hit.key) && m_desk.contains(hit.key)) {
+        m_lastSheet.insert(hit.key, hit.sheet);
+        openDeskNote(hit.key);
+    } else {
+        putNoteAway();
+        view(hit.key, placeLabel(hit.key), hit.sheet);
+        m_note->openAt(center);
+    }
+    m_note->selectRange(hit.start, hit.length);
 }
 
 void Wormhole::showDeskNotes(bool shown)

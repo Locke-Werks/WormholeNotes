@@ -263,6 +263,11 @@ QStringList SheetStore::deskKeys() const
     return keys;
 }
 
+QStringList SheetStore::keys() const
+{
+    return m_places.keys();
+}
+
 void SheetStore::forget(const QString &key)
 {
     if (m_places.remove(key))

@@ -296,6 +296,11 @@ void NoteWindow::setSheet(const QString &label, const QString &text, int index, 
     update();
 }
 
+void NoteWindow::selectRange(int start, int length)
+{
+    m_face->selectRange(start, length);
+}
+
 void NoteWindow::setRing(const QList<RingPlace> &places, int current)
 {
     m_ring = places;
