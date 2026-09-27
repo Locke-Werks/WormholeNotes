@@ -684,7 +684,11 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
     }
     if (m_clipDragging) {
         m_clipDragAngle = Round::angleOf(center(), event->position());
-        m_clipHint = m_ring.at(nearestPlace(m_clipDragAngle)).label;
+        const int nearest = nearestPlace(m_clipDragAngle);
+        m_clipHint = m_ring.at(nearest).label;
+        // The note turns as the clip passes each notch, the same as the
+        // wheel, rather than waiting for the clip to be let go.
+        turnToPlace(nearest);
         update();
         return;
     }
