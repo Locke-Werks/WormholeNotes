@@ -7,6 +7,9 @@ install: `/S`. Options off: `/O:start_menu=off`, `/O:desktop=off`,
 
 **The portable zip** runs from wherever you unzip it. Nothing to install.
 
+**The Firefox .xpi**, when attached, is the browser extension signed by
+Mozilla. Open it in Firefox to install it.
+
 Neither is signed yet, so Windows SmartScreen will warn the first time you run
 it. Choose More info, then Run anyway.
 

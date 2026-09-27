@@ -8,6 +8,7 @@ env:
   # Pinned. One place to bump, and a Forge release cannot silently change what
   # this job produces.
   FORGE_VERSION: v0.4.0
+  WEB_EXT_VERSION: '10.7.0'
   QT_VERSION: '6.8.3'
 
 # Unsigned for now: Windows SmartScreen warns on first run. Signing comes back
@@ -21,14 +22,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the tag matches both version strings
+      - name: Check the tag matches every version string
         shell: pwsh
         run: |
           $tag   = "${{ github.ref_name }}".TrimStart('v')
           $cmake = (Select-String -Path CMakeLists.txt -Pattern 'project\(WormholeNotes VERSION ([0-9.]+)').Matches[0].Groups[1].Value
           $toml  = (Select-String -Path installer.toml -Pattern '^\s*version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          "tag=$tag  CMakeLists=$cmake  installer.toml=$toml"
-          if ($tag -ne $cmake -or $tag -ne $toml) { throw "version mismatch" }
+          $ext   = (Get-Content extension/manifest.json -Raw | ConvertFrom-Json).version
+          "tag=$tag  CMakeLists=$cmake  installer.toml=$toml  extension=$ext"
+          if ($tag -ne $cmake -or $tag -ne $toml -or $tag -ne $ext) { throw "version mismatch" }
           "VERSION=$tag" >> $env:GITHUB_ENV
 
       - name: Install Qt
@@ -100,6 +102,27 @@ jobs:
       - name: Portable zip
         shell: pwsh
         run: Compress-Archive -Path stage/* -DestinationPath "dist/WormholeNotes-$env:VERSION-portable-x64.zip"
+
+      # Mozilla signs the Firefox extension for self-distribution (unlisted),
+      # which is what lets it install for good instead of until Firefox
+      # closes. Skipped until the AMO API keys are repository secrets. A
+      # version can be signed only once, so re-running a tag fails here.
+      - name: Sign the Firefox extension
+        shell: pwsh
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          if (-not $env:AMO_JWT_ISSUER -or -not $env:AMO_JWT_SECRET) {
+            "No AMO keys in the repository secrets; the Firefox extension is not signed."
+            return
+          }
+          npx --yes "web-ext@$env:WEB_EXT_VERSION" sign --source-dir extension --channel unlisted `
+            --api-key $env:AMO_JWT_ISSUER --api-secret $env:AMO_JWT_SECRET --artifacts-dir build/xpi
+          if ($LASTEXITCODE -ne 0) { throw "web-ext sign exited $LASTEXITCODE" }
+          $xpi = Get-ChildItem build/xpi -Filter *.xpi | Select-Object -First 1
+          if (-not $xpi) { throw "web-ext sign produced no .xpi" }
+          Copy-Item $xpi.FullName "dist/WormholeNotes-$env:VERSION-firefox.xpi"
 
       - name: Publish
         shell: pwsh

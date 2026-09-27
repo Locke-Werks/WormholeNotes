@@ -78,8 +78,8 @@ directory. WormholeNotes registers itself with those browsers when it starts.
 
 In Firefox: open `about:debugging#/runtime/this-firefox`, choose Load
 Temporary Add-on, and pick `manifest.json` in the `extension` folder. Firefox
-drops a temporary add-on when it closes; a permanent install needs a signed
-copy.
+drops a temporary add-on when it closes. For a permanent install, open the
+signed `-firefox.xpi` from a release in Firefox.
 
 ## Requirements
 
