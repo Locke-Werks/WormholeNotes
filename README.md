@@ -6,6 +6,7 @@
 
 **A round sticky note that tunnels through every window.**
 
+[![release](https://img.shields.io/github/v/release/Locke-Werks/WormholeNotes?style=flat-square&color=d6262a)](https://github.com/Locke-Werks/WormholeNotes/releases)
 [![license](https://img.shields.io/badge/license-GPLv3-d6262a?style=flat-square)](LICENSE)
 [![platform](https://img.shields.io/badge/platform-Windows%2011-d6262a?style=flat-square)](#requirements)
 
@@ -79,8 +80,9 @@ Silent install: `/S`, with `/O:start_menu=off`, `/O:sign_in=off` or
 
 The portable zip runs from any folder, with nothing to install.
 
-Neither is signed yet, so SmartScreen warns the first time. Choose More info,
-then Run anyway.
+From v0.2.0 the installer and WormholeNotes.exe are signed by Specter Point
+Intelligence, LLC. v0.1.0 is unsigned, so SmartScreen warns the first time:
+choose More info, then Run anyway.
 
 Uninstalling from Installed apps removes the program and its browser
 registration. Your notes stay in `%LOCALAPPDATA%\Locke Werks\WormholeNotes`.

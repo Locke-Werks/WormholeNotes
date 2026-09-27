@@ -11,8 +11,9 @@ env:
   WEB_EXT_VERSION: '10.7.0'
   QT_VERSION: '6.8.3'
 
-# Unsigned for now: Windows SmartScreen warns on first run. Signing comes back
-# when there is a certificate of our own.
+# Signed through Azure Trusted Signing with the Specter Point certificate,
+# until Locke Werks has one of its own. AZURE_TENANT_ID and AZURE_CLIENT_ID
+# are repository variables, AZURE_CLIENT_SECRET a repository secret.
 jobs:
   release:
     runs-on: windows-latest
@@ -21,6 +22,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Fail at once rather than after a full build: a release is signed or
+      # it does not ship.
+      - name: Check the signing settings are present
+        shell: pwsh
+        env:
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          $missing = @()
+          if (-not '${{ vars.AZURE_TENANT_ID }}') { $missing += 'variable AZURE_TENANT_ID' }
+          if (-not '${{ vars.AZURE_CLIENT_ID }}') { $missing += 'variable AZURE_CLIENT_ID' }
+          if (-not $env:AZURE_CLIENT_SECRET) { $missing += 'secret AZURE_CLIENT_SECRET' }
+          if ($missing) { throw "signing is not set up: $($missing -join ', ')" }
 
       - name: Check the tag matches every version string
         shell: pwsh
@@ -65,6 +79,36 @@ jobs:
             Copy-Item (Join-Path $crt.FullName $dll) stage/
           }
 
+      # Only WormholeNotes.exe. The Qt and CRT DLLs already carry their
+      # vendors' signatures, and re-signing them would replace those. Signed
+      # before forging, since the payload is extracted verbatim and the
+      # uninstall hook pins the exe's digest.
+      - name: Sign the payload
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://eus.codesigning.azure.net
+          trusted-signing-account-name: specterpoint
+          certificate-profile-name: specterpoint
+          files-folder: stage
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify every payload binary is signed
+        shell: pwsh
+        run: |
+          $bad = Get-ChildItem stage -Recurse -Include *.exe, *.dll | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            "{0,-50} {1}" -f $_.Name, $sig.Status | Write-Host
+            if ($sig.Status -ne 'Valid') { $_.Name }
+          }
+          if ($bad) { throw "unsigned payload: $($bad -join ', ')" }
+
       - name: Fetch Forge
         shell: pwsh
         env:
@@ -84,16 +128,37 @@ jobs:
             --out "dist/WormholeNotes-$env:VERSION-Setup.exe"
           if ($LASTEXITCODE -ne 0) { throw "lwforge exited $LASTEXITCODE" }
 
+      # No lwforge --sign: that flag only works inside the Forge repo.
+      - name: Sign the installer
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://eus.codesigning.azure.net
+          trusted-signing-account-name: specterpoint
+          certificate-profile-name: specterpoint
+          files-folder: dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
       - name: Check the installer
         shell: pwsh
         run: |
           $setup = "dist/WormholeNotes-$env:VERSION-Setup.exe"
-          # Captured whole before trimming: cutting the pipe early breaks it
-          # under lwforge, which then exits non-zero on a healthy installer.
+          $sig = Get-AuthenticodeSignature $setup
+          "installer: $($sig.Status)  $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { throw "installer is $($sig.Status)" }
+
+          # Proves signing did not orphan the appended container. Captured
+          # whole before trimming: cutting the pipe early breaks it under
+          # lwforge, which then exits non-zero on a healthy installer.
           $inspect = ./tools/lwforge.exe inspect $setup 2>&1
           $code = $LASTEXITCODE
           $inspect | Select-Object -First 12
-          if ($code -ne 0) { throw "the installer cannot read its own container" }
+          if ($code -ne 0) { throw "the signed installer cannot read its own container" }
 
           $report = & $setup --check-only /O:desktop=off 2>&1 | Out-String
           $report

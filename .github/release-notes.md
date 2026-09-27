@@ -10,7 +10,7 @@ install: `/S`. Options off: `/O:start_menu=off`, `/O:desktop=off`,
 **The Firefox .xpi**, when attached, is the browser extension signed by
 Mozilla. Open it in Firefox to install it.
 
-Neither is signed yet, so Windows SmartScreen will warn the first time you run
-it. Choose More info, then Run anyway.
+The installer and WormholeNotes.exe are signed by Specter Point Intelligence,
+LLC.
 
 Windows 10 1809 or later, x64.
