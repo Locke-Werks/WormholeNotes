@@ -63,6 +63,7 @@ private:
     void onNoteMoved();
 
     PlaceTracker m_tracker;
+    ExtensionLink m_extension;
     SheetStore m_store;
     Place m_place;
     QString m_viewKey;

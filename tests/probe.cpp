@@ -20,6 +20,22 @@ int main(int argc, char *argv[])
     QCoreApplication app(argc, argv);
     QTextStream out(stdout);
 
+    // --extension: stand in for WormholeNotes on the host's socket and print
+    // every report the extension's host relays, for ten seconds.
+    if (argc > 1 && qstrcmp(argv[1], "--extension") == 0) {
+        ExtensionLink link;
+        out << (link.listen() ? "listening" : "could not listen") << Qt::endl;
+        QObject::connect(&link, &ExtensionLink::reported, [&](const ExtensionReport &report) {
+            out << "report from " << report.browser << Qt::endl;
+            for (const auto &page : report.showing)
+                out << "    showing " << page.page << "  (" << page.title << ")" << Qt::endl;
+            for (const auto &page : report.tabs)
+                out << "    tab " << page.page << "  (" << page.title << ")" << Qt::endl;
+        });
+        QTimer::singleShot(10000, &app, &QCoreApplication::quit);
+        return app.exec();
+    }
+
     PlaceTracker tracker;
     tracker.start();
 

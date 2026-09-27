@@ -1,5 +1,7 @@
 #pragma once
 
+#include "NativeHost.h"
+
 #include <QHash>
 #include <QList>
 #include <QObject>
@@ -28,9 +30,8 @@ struct Place
 // also keeps the list of places that are open right now, which is what the
 // ring on the note's bezel shows.
 //
-// Page detection is layered: extension, then the address bar through UI
-// Automation, then the window title. The address bar and the title exist so
-// far; the title is used when the address bar cannot be read.
+// Page detection is layered: the browser extension where it is installed,
+// then the address bar through UI Automation, then the window title.
 class PlaceTracker : public QObject
 {
     Q_OBJECT
@@ -52,6 +53,10 @@ public:
     quintptr windowAt(const QPoint &physical) const;
     // The place a window belongs to. False for windows that are not a place.
     bool placeOf(quintptr hwnd, Place *place) const;
+
+    // A report from the browser extension, which outranks every other way of
+    // knowing a browser's pages.
+    void onExtensionReport(const ExtensionReport &report);
 
     // The tracked window's frame on screen in physical pixels, and its DPI.
     // Empty when the window is minimized or gone, which hides the hole.
@@ -128,9 +133,17 @@ private:
     quintptr m_pendingHwnd = 0;
     QString m_pendingTitle;
 
+    struct ExtensionState
+    {
+        QList<ExtensionReport::Page> showing;
+        QList<ExtensionReport::Page> tabs;
+    };
+    QHash<QString, ExtensionState> m_extension; // by browser exe
+
     QHash<QString, OpenPlace> m_open;
     QHash<QString, qint64> m_rank; // by exe
     QHash<quintptr, int> m_taskbar; // window to its button's position
     qint64 m_nextRank = 0;
     bool m_ranked = false;
+    QList<quintptr> m_scratch;
 };

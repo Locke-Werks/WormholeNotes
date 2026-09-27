@@ -8,7 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # 6.5 is the floor: QStyleHints::colorScheme is how the face follows the
 # system light or dark setting.
-find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Network)
 qt_standard_project_setup()
 
 set(WORMHOLENOTES_SOURCES
@@ -25,6 +25,8 @@ set(WORMHOLENOTES_SOURCES
     src/HoleWindow.h
     src/DeskNote.cpp
     src/DeskNote.h
+    src/NativeHost.cpp
+    src/NativeHost.h
     src/NoteWindow.cpp
     src/NoteWindow.h
     src/NoteFace.cpp
@@ -62,9 +64,12 @@ endif()
 
 # dwmapi for the visible frame and cloaking of the window the hole rides on,
 # ole32 and oleaut32 for UI Automation.
-target_link_libraries(WormholeNotes PRIVATE Qt6::Widgets dwmapi ole32 oleaut32)
+# Network for the local socket the extension's host relays through.
+target_link_libraries(WormholeNotes PRIVATE Qt6::Widgets Qt6::Network dwmapi ole32 oleaut32)
 
 install(TARGETS WormholeNotes RUNTIME DESTINATION .)
+# The browser extension, for loading unpacked until it is in a store.
+install(DIRECTORY extension/ DESTINATION extension)
 
 enable_testing()
 qt_add_executable(wormhole-store-test tests/store.cpp src/SheetStore.cpp src/SheetStore.h)
@@ -74,6 +79,8 @@ add_test(NAME store COMMAND wormhole-store-test)
 # A console probe of place detection on the real desktop. Not installed.
 qt_add_executable(wormhole-probe
     tests/probe.cpp
+    src/NativeHost.cpp
+    src/NativeHost.h
     src/PlaceTracker.cpp
     src/PlaceTracker.h
     src/BrowserReader.cpp
@@ -82,7 +89,7 @@ qt_add_executable(wormhole-probe
 if(MSVC)
     target_compile_options(wormhole-probe PRIVATE /W4 /permissive- /utf-8)
 endif()
-target_link_libraries(wormhole-probe PRIVATE Qt6::Core dwmapi ole32 oleaut32)
+target_link_libraries(wormhole-probe PRIVATE Qt6::Core Qt6::Network dwmapi ole32 oleaut32)
 
 # Renders the note offscreen to PNG, for looking at the bezel. Not installed.
 qt_add_executable(wormhole-render

@@ -21,6 +21,7 @@ Wormhole::Wormhole(QObject *parent)
     connect(&m_tracker, &PlaceTracker::placeChanged, this, &Wormhole::onPlaceChanged);
     connect(&m_tracker, &PlaceTracker::anchorMoved, this, &Wormhole::reposition);
     connect(&m_tracker, &PlaceTracker::placeClosed, this, &Wormhole::onPlaceClosed);
+    connect(&m_extension, &ExtensionLink::reported, &m_tracker, &PlaceTracker::onExtensionReport);
     connect(&m_tracker, &PlaceTracker::openPlacesChanged, this, [this] {
         if (m_note->isVisible())
             updateRing();
@@ -69,6 +70,8 @@ Wormhole::~Wormhole()
 void Wormhole::start()
 {
     m_store.load();
+    m_extension.listen();
+    NativeHost::registerForUser();
     for (const QString &key : m_store.deskKeys())
         createDeskNote(key);
     m_tray->show();

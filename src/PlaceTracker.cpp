@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <utility>
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
@@ -294,7 +295,18 @@ void PlaceTracker::resolve()
         setPlace(appPlace(w), {});
         return;
     }
-    // A browser's place is its page, which takes a read of the address bar.
+    // With the extension, the browser says which page each window shows.
+    if (auto ext = m_extension.constFind(w.exe); ext != m_extension.constEnd()) {
+        const QString title = pageFromTitle(w.title);
+        for (const ExtensionReport::Page &page : ext->showing) {
+            if (!page.page.isEmpty() && sameTab(page.title, title)) {
+                setPlace(browserPlace(w, page.page), title);
+                return;
+            }
+        }
+    }
+    // Otherwise a browser's place is its page, which takes a read of the
+    // address bar.
     // The read is asked for again only when the title changes, since that is
     // what a new page or a different tab looks like from outside.
     if (m_readTitle.contains(w.hwnd) && m_readTitle.value(w.hwnd) == w.title) {
@@ -471,6 +483,10 @@ void PlaceTracker::refreshOpen()
 
 void PlaceTracker::onTabsRead(quintptr hwnd, const QStringList &tabs, const QString &page)
 {
+    // The extension's list of tabs is exact; the tab strip is only a guess.
+    Window browser;
+    if (describe(hwnd, &browser, false) && m_extension.contains(browser.exe))
+        return;
     // Every browser window's active page is open, visited or not.
     Window w;
     if (!page.isEmpty() && describe(hwnd, &w, false) && w.browser)
@@ -504,6 +520,53 @@ void PlaceTracker::onTabsRead(quintptr hwnd, const QStringList &tabs, const QStr
     }
     for (const QString &key : std::as_const(closed))
         close(key);
+}
+
+void PlaceTracker::onExtensionReport(const ExtensionReport &report)
+{
+    m_extension.insert(report.browser, { report.showing, report.tabs });
+
+    QList<Window> windows;
+    EnumWindows(
+        [](HWND hwnd, LPARAM data) -> BOOL {
+            reinterpret_cast<QList<quintptr> *>(data)->append(quintptr(hwnd));
+            return TRUE;
+        },
+        LPARAM(&m_scratch));
+    for (const quintptr h : std::exchange(m_scratch, {})) {
+        Window w;
+        if (describe(h, &w, true) && w.exe == report.browser)
+            windows.append(w);
+    }
+    if (windows.isEmpty())
+        return;
+
+    // Every open tab is an open place. A tab showing in a window rides that
+    // window; one behind another tab rides the first window, which is only
+    // used for its place on the taskbar.
+    QSet<QString> open;
+    for (const ExtensionReport::Page &tab : report.tabs) {
+        if (tab.page.isEmpty())
+            continue;
+        const Window *host = &windows.constFirst();
+        for (const Window &w : std::as_const(windows)) {
+            if (sameTab(tab.title, pageFromTitle(w.title)))
+                host = &w;
+        }
+        const Place place = browserPlace(*host, tab.page);
+        open.insert(place.key);
+        addOpen(place, tab.title);
+    }
+
+    const QString prefix = report.browser + u'|';
+    QStringList closed;
+    for (auto it = m_open.cbegin(); it != m_open.cend(); ++it) {
+        if (it.key().startsWith(prefix) && !open.contains(it.key()) && it.key() != m_place.key)
+            closed.append(it.key());
+    }
+    for (const QString &key : std::as_const(closed))
+        close(key);
+    m_settle.start();
 }
 
 void PlaceTracker::onTaskbarRead(const QList<quintptr> &windows)

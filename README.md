@@ -44,10 +44,19 @@ kept and close with their page.
 Sheets are stored locally in `%LOCALAPPDATA%\Locke Werks\WormholeNotes\sheets.json`.
 Nothing is synced.
 
-## Status
+Right-click a note and choose Tear Off to Desktop, or drag it by its rim and
+drop it where only the desktop shows, and it becomes a small round note on the
+desktop. Drag that onto any window to hand its writing to that place.
 
-Early. Tearing a note off onto the desktop and a browser extension for page
-detection are next.
+## Browser extension
+
+Without it, WormholeNotes reads the page from the address bar. With it, the
+browser says exactly which page each window shows and which tabs are open.
+It sends URLs and titles to WormholeNotes on this machine and nowhere else.
+
+In Chrome, Edge or Brave: open the extensions page, turn on Developer mode,
+choose Load unpacked, and pick the `extension` folder in the install
+directory. WormholeNotes registers itself with those browsers when it starts.
 
 ## Requirements
 
