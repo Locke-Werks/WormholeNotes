@@ -296,9 +296,11 @@ void PlaceTracker::resolve()
         return;
     }
     // With the extension, the browser says which page each window shows.
-    if (auto ext = m_extension.constFind(w.exe); ext != m_extension.constEnd()) {
-        const QString title = pageFromTitle(w.title);
-        for (const ExtensionReport::Page &page : ext->showing) {
+    const QString title = pageFromTitle(w.title);
+    for (const ExtensionState &ext : std::as_const(m_extension)) {
+        if (ext.browser != w.exe)
+            continue;
+        for (const ExtensionReport::Page &page : ext.showing) {
             if (!page.page.isEmpty() && sameTab(page.title, title)) {
                 setPlace(browserPlace(w, page.page), title);
                 return;
@@ -485,7 +487,7 @@ void PlaceTracker::onTabsRead(quintptr hwnd, const QStringList &tabs, const QStr
 {
     // The extension's list of tabs is exact; the tab strip is only a guess.
     Window browser;
-    if (describe(hwnd, &browser, false) && m_extension.contains(browser.exe))
+    if (describe(hwnd, &browser, false) && hasExtension(browser.exe))
         return;
     // Every browser window's active page is open, visited or not.
     Window w;
@@ -522,9 +524,29 @@ void PlaceTracker::onTabsRead(quintptr hwnd, const QStringList &tabs, const QStr
         close(key);
 }
 
+bool PlaceTracker::hasExtension(const QString &exe) const
+{
+    for (const ExtensionState &ext : m_extension) {
+        if (ext.browser == exe)
+            return true;
+    }
+    return false;
+}
+
 void PlaceTracker::onExtensionReport(const ExtensionReport &report)
 {
-    m_extension.insert(report.browser, { report.showing, report.tabs });
+    // A profile that has closed every window sent its last report; forget it
+    // so its tabs stop counting as open.
+    for (auto it = m_extension.begin(); it != m_extension.end();) {
+        bool live = it.key() == report.source || it->hosts.isEmpty();
+        for (const quintptr hwnd : std::as_const(it->hosts))
+            live = live || IsWindow(HWND(hwnd));
+        it = live ? std::next(it) : m_extension.erase(it);
+    }
+    ExtensionState &state = m_extension[report.source];
+    state.browser = report.browser;
+    state.showing = report.showing;
+    state.tabs = report.tabs;
 
     QList<Window> windows;
     EnumWindows(
@@ -541,23 +563,50 @@ void PlaceTracker::onExtensionReport(const ExtensionReport &report)
     if (windows.isEmpty())
         return;
 
-    // Every open tab is an open place. A tab showing in a window rides that
-    // window; one behind another tab rides the first window, which is only
-    // used for its place on the taskbar.
-    QSet<QString> open;
+    // Each browser window is found by the title of the tab it shows, which
+    // also sorts out which windows belong to this profile.
+    QHash<qint64, const Window *> windowOf;
+    for (const ExtensionReport::Page &showing : report.showing) {
+        for (const Window &w : std::as_const(windows)) {
+            if (sameTab(showing.title, pageFromTitle(w.title))) {
+                windowOf.insert(showing.window, &w);
+                break;
+            }
+        }
+    }
+    // A window whose showing tab could not be matched (its title is still
+    // loading) lends its tabs to another window of the same profile, and only
+    // failing that to any window of the browser. Either is only used for a
+    // place on the taskbar.
+    const Window *fallback = windowOf.isEmpty() ? &windows.constFirst() : *windowOf.cbegin();
+
+    // Every open tab is an open place, riding its own window.
+    state.keys.clear();
+    state.hosts.clear();
     for (const ExtensionReport::Page &tab : report.tabs) {
         if (tab.page.isEmpty())
             continue;
-        const Window *host = &windows.constFirst();
-        for (const Window &w : std::as_const(windows)) {
-            if (sameTab(tab.title, pageFromTitle(w.title)))
-                host = &w;
-        }
+        const Window *host = windowOf.value(tab.window, fallback);
         const Place place = browserPlace(*host, tab.page);
-        open.insert(place.key);
+        // Where the extension puts a tab replaces wherever it was guessed to
+        // be, unless another profile has the same page open in its window.
+        bool shared = false;
+        for (auto ext = m_extension.cbegin(); ext != m_extension.cend(); ++ext)
+            shared = shared || (ext.key() != report.source && ext->keys.contains(place.key));
+        if (auto it = m_open.find(place.key); it != m_open.end() && !shared && !state.keys.contains(place.key))
+            it->titles.clear();
+        state.keys.insert(place.key);
+        state.hosts.insert(host->hwnd);
         addOpen(place, tab.title);
     }
 
+    // A page closes when no profile of this browser still has it open. Pages
+    // the address bar layer found before the extension spoke close too.
+    QSet<QString> open;
+    for (const ExtensionState &ext : std::as_const(m_extension)) {
+        if (ext.browser == report.browser)
+            open.unite(ext.keys);
+    }
     const QString prefix = report.browser + u'|';
     QStringList closed;
     for (auto it = m_open.cbegin(); it != m_open.cend(); ++it) {

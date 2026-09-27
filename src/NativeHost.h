@@ -45,8 +45,11 @@ struct ExtensionReport
     {
         QString page;  // host grain, as BrowserReader::pageOf gives it
         QString title;
+        qint64 window = -1; // the browser's own window id, not a handle
     };
     QString browser; // lower-case exe name
+    // Which copy of the extension sent it: one per browser profile.
+    qint64 source = 0;
     QList<Page> showing;
     QList<Page> tabs;
 };

@@ -30,12 +30,15 @@ async function report() {
   const tabs = await chrome.tabs.query({});
   const focused = await chrome.windows.getLastFocused({}).catch(() => null);
   const active = tabs.find((t) => t.active && focused && t.windowId === focused.id);
+  // The window id lets WormholeNotes put a tab behind others with the window
+  // it is in, found by that window's showing tab.
+  const page = (t) => ({ url: t.url || "", title: t.title || "", window: t.windowId });
   send({
-    active: active ? { url: active.url || "", title: active.title || "" } : null,
+    active: active ? page(active) : null,
     // Every window's showing tab, so a window that is not focused still
     // knows its page.
-    showing: tabs.filter((t) => t.active).map((t) => ({ url: t.url || "", title: t.title || "" })),
-    tabs: tabs.map((t) => ({ url: t.url || "", title: t.title || "" })),
+    showing: tabs.filter((t) => t.active).map(page),
+    tabs: tabs.map(page),
   });
 }
 

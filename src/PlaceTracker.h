@@ -135,10 +135,17 @@ private:
 
     struct ExtensionState
     {
+        QString browser;
         QList<ExtensionReport::Page> showing;
         QList<ExtensionReport::Page> tabs;
+        // The places this copy of the extension opened, and the windows it
+        // found for them.
+        QSet<QString> keys;
+        QSet<quintptr> hosts;
     };
-    QHash<QString, ExtensionState> m_extension; // by browser exe
+    // By source: one per browser profile running the extension.
+    QHash<qint64, ExtensionState> m_extension;
+    bool hasExtension(const QString &exe) const;
 
     QHash<QString, OpenPlace> m_open;
     QHash<QString, qint64> m_rank; // by exe

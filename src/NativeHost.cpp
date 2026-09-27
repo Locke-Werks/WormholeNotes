@@ -98,6 +98,9 @@ int run()
 
         QJsonObject message = QJsonDocument::fromJson(body).object();
         message.insert(QStringLiteral("browser"), browser);
+        // Every browser profile runs its own copy of the extension, and each
+        // copy its own host: this process's id tells the profiles apart.
+        message.insert(QStringLiteral("source"), qint64(GetCurrentProcessId()));
         if (socket.state() != QLocalSocket::ConnectedState) {
             socket.connectToServer(kSocket);
             if (!socket.waitForConnected(500))
@@ -224,12 +227,14 @@ void ExtensionLink::onMessage(const QJsonObject &message)
     report.browser = message.value(QStringLiteral("browser")).toString();
     if (report.browser.isEmpty())
         return;
+    report.source = message.value(QStringLiteral("source")).toInteger();
     const auto pages = [](const QJsonValue &value) {
         QList<ExtensionReport::Page> out;
         for (const QJsonValue &tab : value.toArray()) {
             const QJsonObject o = tab.toObject();
             out.append({ BrowserReader::pageOf(o.value(QStringLiteral("url")).toString()),
-                         o.value(QStringLiteral("title")).toString() });
+                         o.value(QStringLiteral("title")).toString(),
+                         o.value(QStringLiteral("window")).toInteger(-1) });
         }
         return out;
     };
