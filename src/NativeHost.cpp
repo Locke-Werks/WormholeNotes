@@ -111,8 +111,8 @@ int run()
 
 // Writes a host manifest, only when it differs, and points each registry
 // base at it.
-static void registerManifest(const QString &path, const QJsonObject &manifest,
-                             std::initializer_list<const wchar_t *> bases)
+template <typename Bases>
+static void registerManifest(const QString &path, const QJsonObject &manifest, const Bases &bases)
 {
     const QByteArray bytes = QJsonDocument(manifest).toJson();
     QFile existing(path);
@@ -132,9 +132,47 @@ static void registerManifest(const QString &path, const QJsonObject &manifest,
     }
 }
 
+namespace {
+
+const wchar_t *const kChromiumBases[] = {
+    L"Software\\Google\\Chrome\\NativeMessagingHosts\\",
+    L"Software\\Microsoft\\Edge\\NativeMessagingHosts\\",
+    L"Software\\BraveSoftware\\Brave-Browser\\NativeMessagingHosts\\",
+};
+const wchar_t *const kFirefoxBases[] = { L"Software\\Mozilla\\NativeMessagingHosts\\" };
+
+QString manifestDir()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+}
+
+} // namespace
+
+void unregisterForUser()
+{
+    const QString self = QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+    const auto drop = [&](const QString &name, const auto &bases) {
+        const QString path = manifestDir() + u'/' + name;
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly))
+            return;
+        const QString named = QJsonDocument::fromJson(file.readAll()).object().value(QStringLiteral("path")).toString();
+        file.close();
+        if (named.compare(self, Qt::CaseInsensitive) != 0)
+            return;
+        for (const wchar_t *base : bases) {
+            const std::wstring key = std::wstring(base) + QString::fromLatin1(kHostName).toStdWString();
+            RegDeleteKeyW(HKEY_CURRENT_USER, key.c_str());
+        }
+        QFile::remove(path);
+    };
+    drop(QStringLiteral("native-host.json"), kChromiumBases);
+    drop(QStringLiteral("native-host-firefox.json"), kFirefoxBases);
+}
+
 void registerForUser()
 {
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    const QString dir = manifestDir();
     QDir().mkpath(dir);
 
     QJsonObject manifest;
@@ -148,15 +186,11 @@ void registerForUser()
     QJsonObject chromium = manifest;
     chromium.insert(QStringLiteral("allowed_origins"),
                     QJsonArray{ QStringLiteral("chrome-extension://%1/").arg(QString::fromLatin1(kExtensionId)) });
-    registerManifest(QDir::toNativeSeparators(dir + QStringLiteral("/native-host.json")), chromium,
-                     { L"Software\\Google\\Chrome\\NativeMessagingHosts\\",
-                       L"Software\\Microsoft\\Edge\\NativeMessagingHosts\\",
-                       L"Software\\BraveSoftware\\Brave-Browser\\NativeMessagingHosts\\" });
+    registerManifest(QDir::toNativeSeparators(dir + QStringLiteral("/native-host.json")), chromium, kChromiumBases);
 
     QJsonObject firefox = manifest;
     firefox.insert(QStringLiteral("allowed_extensions"), QJsonArray{ QString::fromLatin1(kGeckoId) });
-    registerManifest(QDir::toNativeSeparators(dir + QStringLiteral("/native-host-firefox.json")), firefox,
-                     { L"Software\\Mozilla\\NativeMessagingHosts\\" });
+    registerManifest(QDir::toNativeSeparators(dir + QStringLiteral("/native-host-firefox.json")), firefox, kFirefoxBases);
 }
 
 } // namespace NativeHost

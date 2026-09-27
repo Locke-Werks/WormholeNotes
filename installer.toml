@@ -106,3 +106,13 @@ when   = "desktop"
 
 [[actions]]
 type = "arp"
+
+# WormholeNotes registers its extension host in the user's own registry every
+# time it starts, which no install action recorded, so uninstall takes it back
+# the same way: as the user, since elevated HKCU may be someone else's.
+[[hooks.pre_uninstall]]
+id     = "unregister-browsers"
+run    = "payload:WormholeNotes.exe"
+as     = "user"
+args   = ["--unregister-browsers"]
+sha256 = "auto"

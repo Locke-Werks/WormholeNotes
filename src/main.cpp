@@ -20,6 +20,16 @@ int main(int argc, char *argv[])
         return NativeHost::run();
     }
 
+    // Run by the uninstaller, as the user, to take back what registerForUser
+    // wrote into their profile.
+    if (argc > 1 && qstrcmp(argv[1], "--unregister-browsers") == 0) {
+        QCoreApplication tool(argc, argv);
+        QCoreApplication::setOrganizationName(QStringLiteral("Locke Werks"));
+        QCoreApplication::setApplicationName(QStringLiteral("WormholeNotes"));
+        NativeHost::unregisterForUser();
+        return 0;
+    }
+
     // One hole per desktop. A second copy would put a second hole on every
     // window and write the same sheets file from two processes.
     HANDLE instance = CreateMutexW(nullptr, TRUE, L"LockeWerks.WormholeNotes.Instance");

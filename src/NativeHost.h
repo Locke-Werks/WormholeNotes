@@ -30,6 +30,9 @@ int run();
 // hosts under the user's registry (Chrome, Edge, Brave and Firefox), so
 // installing the extension is the only step left. Per user, so no elevation.
 void registerForUser();
+// Undoes registerForUser, but only where the host manifest names this same
+// executable: uninstalling one copy leaves another copy's registration alone.
+void unregisterForUser();
 
 } // namespace NativeHost
 
