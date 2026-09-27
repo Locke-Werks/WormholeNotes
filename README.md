@@ -39,11 +39,12 @@ A hole with something written behind it glows. An empty one is dark. On the
 rim, a notch marks every open place, bright where something is written, in
 the same order as the taskbar.
 
-The writing runs along one spiral groove, from the rim at noon, clockwise,
-in towards the middle, like a record. A new paragraph leaves a dot in the
-groove rather than breaking it. When the spiral reaches the middle the page
-is full and the next one starts again at the rim. Up and Down move a turn out
-or in.
+The writing runs along one spiral groove, like a record. The newest words sit
+upright across the top of the rim, and as you keep typing, earlier writing
+slides back along the groove towards the middle. A new paragraph leaves a dot
+in the groove rather than breaking it. When the groove is full, the oldest
+writing moves to the page before. Move the caret back to fix something and the
+note turns until that spot is at the top, the right way up.
 
 Each sheet has a ring colour, one of the six house colours: cyan, violet,
 blue, magenta, crimson or ember. It lights the rim, the caret and the hole,
