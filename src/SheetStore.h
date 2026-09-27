@@ -6,6 +6,8 @@
 #include <QString>
 #include <QStringList>
 #include <QDate>
+#include <QDateTime>
+#include <QList>
 #include <QTimer>
 
 #include <functional>
@@ -72,6 +74,19 @@ public:
     // was made today by this call.
     QString backupDaily(const QDate &today = QDate::currentDate(), int keep = 14);
     QString backupDirectory() const;
+    struct Backup
+    {
+        QString path;
+        QDateTime taken; // a daily copy's day at midnight
+        // The notes a restore replaced, kept so the restore can be undone.
+        bool beforeRestore = false;
+    };
+    // Every backup, newest first.
+    QList<Backup> backups() const;
+    // Makes a backup the current notes, keeping the notes it replaces as a
+    // before-restore backup first. False, with nothing changed, when the
+    // backup cannot be read.
+    bool restore(const QString &backupPath);
     // Every written sheet as one Markdown document, a section per place,
     // named by `label`.
     QString exportMarkdown(const std::function<QString(const QString &key)> &label) const;
@@ -83,6 +98,7 @@ public:
 
 private:
     void touch();
+    bool read(const QString &from, QHash<QString, PlaceRecord> *places, QPointF *lastHole) const;
 
     QHash<QString, PlaceRecord> m_places;
     QPointF m_lastHole;

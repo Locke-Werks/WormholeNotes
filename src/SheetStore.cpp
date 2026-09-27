@@ -20,6 +20,11 @@ namespace {
 constexpr int kFormat = 3;
 // In the title bar, left of where the caption buttons usually end.
 const QPointF kDefaultHole(170, 18);
+// Copies of the notes a restore replaced. Restores are rare, so a handful
+// covers changing your mind a few times.
+constexpr int kKeptBeforeRestore = 5;
+// Sorts by name in time order, which is how the oldest are found to drop.
+const QString kStampFormat = QStringLiteral("yyyy-MM-dd'T'HHmmsszzz");
 
 bool blank(const QString &text)
 {
@@ -58,13 +63,22 @@ QString SheetStore::path() const
 
 void SheetStore::load()
 {
-    QFile file(path());
+    read(path(), &m_places, &m_lastHole);
+}
+
+bool SheetStore::read(const QString &from, QHash<QString, PlaceRecord> *out, QPointF *lastHole) const
+{
+    QFile file(from);
     if (!file.open(QIODevice::ReadOnly))
-        return;
-    const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
+        return false;
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject())
+        return false;
+    const QJsonObject root = document.object();
     const QJsonArray last = root.value(QStringLiteral("lastHole")).toArray();
     if (last.size() == 2 && last.at(0).toDouble() >= 0 && last.at(1).toDouble() >= 0)
-        m_lastHole = QPointF(last.at(0).toDouble(), last.at(1).toDouble());
+        *lastHole = QPointF(last.at(0).toDouble(), last.at(1).toDouble());
 
     const int format = root.value(QStringLiteral("format")).toInt(1);
     const QJsonObject places = root.value(format >= 2 ? QStringLiteral("places") : QStringLiteral("sheets")).toObject();
@@ -95,8 +109,64 @@ void SheetStore::load()
             record.desk = QPoint(desk.at(0).toInt(), desk.at(1).toInt());
             record.onDesk = true;
         }
-        m_places.insert(it.key(), record);
+        out->insert(it.key(), record);
     }
+    return true;
+}
+
+QList<SheetStore::Backup> SheetStore::backups() const
+{
+    QList<Backup> out;
+    const QDir dir(backupDirectory());
+    for (const QFileInfo &info : dir.entryInfoList({ QStringLiteral("sheets-*.json") }, QDir::Files)) {
+        const QString name = info.completeBaseName();
+        Backup backup;
+        backup.path = info.absoluteFilePath();
+        if (name.startsWith(QLatin1String("sheets-before-restore-"))) {
+            // A counter after the stamp only separates copies made in the
+            // same millisecond.
+            backup.taken = QDateTime::fromString(name.mid(22, 20), kStampFormat);
+            backup.beforeRestore = true;
+        } else {
+            backup.taken = QDateTime(QDate::fromString(name.mid(7), Qt::ISODate), QTime(0, 0));
+        }
+        if (backup.taken.isValid())
+            out.append(backup);
+    }
+    std::sort(out.begin(), out.end(), [](const Backup &a, const Backup &b) { return a.taken > b.taken; });
+    return out;
+}
+
+bool SheetStore::restore(const QString &backupPath)
+{
+    QHash<QString, PlaceRecord> places;
+    QPointF lastHole = kDefaultHole;
+    if (!read(backupPath, &places, &lastHole))
+        return false;
+
+    flush();
+    // The notes being replaced are kept first, so a restore can be undone
+    // from the same list it was made from.
+    QDir dir(backupDirectory());
+    dir.mkpath(QStringLiteral("."));
+    if (QFile::exists(path())) {
+        // Never over an earlier copy: that may be the very one being restored.
+        const QString stamp = QDateTime::currentDateTime().toString(kStampFormat);
+        QString kept = QStringLiteral("sheets-before-restore-%1.json").arg(stamp);
+        for (int n = 2; dir.exists(kept); ++n)
+            kept = QStringLiteral("sheets-before-restore-%1-%2.json").arg(stamp).arg(n);
+        if (!QFile::copy(path(), dir.filePath(kept)))
+            return false;
+        QStringList earlier = dir.entryList({ QStringLiteral("sheets-before-restore-*.json") }, QDir::Files, QDir::Name);
+        while (earlier.size() > kKeptBeforeRestore)
+            dir.remove(earlier.takeFirst());
+    }
+
+    m_places = places;
+    m_lastHole = lastHole;
+    m_dirty = true;
+    flush();
+    return true;
 }
 
 void SheetStore::flush()

@@ -95,6 +95,8 @@ Wormhole::Wormhole(QObject *parent)
     m_showDesk->setCheckable(true);
     connect(m_showDesk, &QAction::triggered, this, &Wormhole::showDeskNotes);
     menu->addAction(tr("Export Notes..."), this, &Wormhole::exportNotes);
+    m_restoreMenu = menu->addMenu(tr("Restore Notes"));
+    connect(m_restoreMenu, &QMenu::aboutToShow, this, &Wormhole::fillRestoreMenu);
     m_hideAction = menu->addAction(tr("Hide Wormhole"));
     m_hideAction->setCheckable(true);
     connect(m_hideAction, &QAction::triggered, this, &Wormhole::setHidden);
@@ -425,6 +427,46 @@ void Wormhole::onDeskNoteDropped(const QString &key)
     desk->deleteLater();
     if (target.key == m_place.key)
         updateHole();
+}
+
+void Wormhole::fillRestoreMenu()
+{
+    m_restoreMenu->clear();
+    const QLocale locale;
+    const QList<SheetStore::Backup> backups = m_store.backups();
+    for (const SheetStore::Backup &backup : backups) {
+        const QString name = backup.beforeRestore
+            ? tr("Before restoring, %1").arg(locale.toString(backup.taken, QLocale::ShortFormat))
+            : locale.toString(backup.taken.date(), QLocale::LongFormat);
+        const QString path = backup.path;
+        m_restoreMenu->addAction(name, this, [this, path, name] { restoreNotes(path, name); });
+    }
+    if (backups.isEmpty())
+        m_restoreMenu->addAction(tr("No backups yet"))->setEnabled(false);
+}
+
+// No confirmation: the notes being replaced are kept and listed first in the
+// same menu, so a wrong pick is one more pick to undo.
+void Wormhole::restoreNotes(const QString &path, const QString &name)
+{
+    putNoteAway();
+    showDeskNotes(false);
+    m_search->hide();
+    if (!m_store.restore(path)) {
+        m_tray->showMessage(tr("Could not restore"), tr("The backup from %1 could not be read.").arg(name),
+                            QSystemTrayIcon::Warning, 6000);
+        return;
+    }
+    qDeleteAll(m_desk);
+    m_desk.clear();
+    for (const QString &key : m_store.deskKeys())
+        createDeskNote(key);
+    m_lastSheet.clear();
+    updateHole();
+    reposition();
+    m_tray->showMessage(tr("Notes restored"),
+                        tr("Back to %1. The notes it replaced are first under Restore Notes.").arg(name),
+                        QSystemTrayIcon::NoIcon, 6000);
 }
 
 void Wormhole::exportNotes()

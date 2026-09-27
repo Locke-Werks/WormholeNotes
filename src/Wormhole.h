@@ -14,6 +14,7 @@ class SearchWindow;
 struct SearchHit;
 class TearTarget;
 class QAction;
+class QMenu;
 class QSystemTrayIcon;
 
 // Ties the pieces together: the tracker says where the user is, the store
@@ -83,6 +84,8 @@ private:
     // Opens Find in Notes, or closes it when it is already open.
     void toggleSearch();
     void exportNotes();
+    void fillRestoreMenu();
+    void restoreNotes(const QString &path, const QString &name);
     void runSearch(const QString &query);
     void openHit(const SearchHit &hit);
     QString placeLabel(const QString &key) const;
@@ -103,6 +106,7 @@ private:
     Hotkey *m_hotkey = nullptr;
     QSystemTrayIcon *m_tray = nullptr;
     QAction *m_showDesk = nullptr;
+    QMenu *m_restoreMenu = nullptr;
     bool m_deskShown = false;
     QAction *m_hideAction = nullptr;
     bool m_hidden = false;

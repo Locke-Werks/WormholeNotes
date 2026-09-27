@@ -122,6 +122,38 @@ int main(int argc, char *argv[])
                                     QStringLiteral("sheets-2026-09-06.json") }),
               "only the newest days are kept");
         QDir(store.backupDirectory()).removeRecursively();
+
+        // Restore: yesterday's copy comes back, and today's notes are kept
+        // so the restore itself can be undone.
+        store.setSheet(QStringLiteral("notepad.exe"), QStringLiteral("Notepad"), 0, QStringLiteral("yesterday"));
+        store.backupDaily(QDate(2026, 9, 26));
+        store.setSheet(QStringLiteral("notepad.exe"), QStringLiteral("Notepad"), 0, QStringLiteral("today"));
+        const QList<SheetStore::Backup> before = store.backups();
+        check(before.size() == 1 && !before.constFirst().beforeRestore, "the daily copy is listed");
+        check(store.restore(before.constFirst().path)
+                  && store.place(QStringLiteral("notepad.exe")).sheets.constFirst() == QLatin1String("yesterday"),
+              "restoring a day brings its notes back");
+        const QList<SheetStore::Backup> after = store.backups();
+        check(after.size() == 2 && after.constFirst().beforeRestore, "the replaced notes are kept, listed first");
+        check(store.restore(after.constFirst().path)
+                  && store.place(QStringLiteral("notepad.exe")).sheets.constFirst() == QLatin1String("today"),
+              "the replaced notes can be restored in turn");
+        {
+            SheetStore reread;
+            reread.load();
+            check(reread.place(QStringLiteral("notepad.exe")).sheets.constFirst() == QLatin1String("today"),
+                  "a restore is written to disk");
+        }
+        QFile broken(QDir(store.backupDirectory()).filePath(QStringLiteral("sheets-2026-09-20.json")));
+        broken.open(QIODevice::WriteOnly);
+        broken.write("{ not json");
+        broken.close();
+        const qsizetype listed = store.backups().size();
+        check(!store.restore(broken.fileName())
+                  && store.place(QStringLiteral("notepad.exe")).sheets.constFirst() == QLatin1String("today")
+                  && store.backups().size() == listed,
+              "a broken backup changes nothing");
+        QDir(store.backupDirectory()).removeRecursively();
     }
 
     QFile::remove(SheetStore().path());
