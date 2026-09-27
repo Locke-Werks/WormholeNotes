@@ -99,6 +99,10 @@ qt_add_executable(wormhole-spiral-test tests/spiral.cpp src/SpiralLayout.cpp src
 target_link_libraries(wormhole-spiral-test PRIVATE Qt6::Gui)
 # Offscreen, so the test runs on CI with no display.
 add_test(NAME spiral COMMAND wormhole-spiral-test -platform offscreen)
+# Another app's Qt on PATH would otherwise be loaded ahead of the one built
+# against, and a mismatched Qt6Gui fails fast before main.
+set_tests_properties(store spiral PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
 # A console probe of place detection on the real desktop. Not installed.
 qt_add_executable(wormhole-probe
