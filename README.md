@@ -33,7 +33,8 @@ the new window with that place's notes behind it.
 | Escape, or switch apps | The note folds back into the hole |
 | Right-click the note | Edit commands, About, Quit |
 | Tray menu > Show Desk Notes | Desk notes come up above your windows until you switch apps |
-| Tray menu > Find in Notes | Search every sheet in every place; Enter opens the note at the match |
+| Tray menu > Find in Notes, or Win+Shift+F | Search every sheet in every place; Enter opens the note at the match. Ctrl+Alt+Shift+F when another program holds Win+Shift+F |
+| Tray menu > Hide Wormhole | Everything off screen for recording or sharing, until you untick it, restarts included |
 | Drag the rim, or its outer edge | The note moves, or the circle resizes |
 
 A hole with something written behind it glows. An empty one is dark. On the

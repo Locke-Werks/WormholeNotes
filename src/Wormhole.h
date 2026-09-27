@@ -75,6 +75,9 @@ private:
     // Desk notes live under every window. This brings them up to be found,
     // until the user moves on to another app.
     void showDeskNotes(bool shown);
+    // Takes everything off the screen, for recording or sharing it, until
+    // asked back. Nothing is lost; it is only not drawn.
+    void setHidden(bool hidden);
 
     // Search across every sheet.
     // Opens Find in Notes, or closes it when it is already open.
@@ -100,4 +103,6 @@ private:
     QSystemTrayIcon *m_tray = nullptr;
     QAction *m_showDesk = nullptr;
     bool m_deskShown = false;
+    QAction *m_hideAction = nullptr;
+    bool m_hidden = false;
 };

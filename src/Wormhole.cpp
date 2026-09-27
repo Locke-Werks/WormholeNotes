@@ -12,6 +12,7 @@
 #include <QGuiApplication>
 #include <QMenu>
 #include <QScreen>
+#include <QSettings>
 
 #include <cmath>
 #include <QSystemTrayIcon>
@@ -90,9 +91,13 @@ Wormhole::Wormhole(QObject *parent)
     m_showDesk = menu->addAction(tr("Show Desk Notes"));
     m_showDesk->setCheckable(true);
     connect(m_showDesk, &QAction::triggered, this, &Wormhole::showDeskNotes);
+    m_hideAction = menu->addAction(tr("Hide Wormhole"));
+    m_hideAction->setCheckable(true);
+    connect(m_hideAction, &QAction::triggered, this, &Wormhole::setHidden);
     connect(menu, &QMenu::aboutToShow, this, [this] {
-        m_showDesk->setEnabled(!m_desk.isEmpty());
+        m_showDesk->setEnabled(!m_desk.isEmpty() && !m_hidden);
         m_showDesk->setChecked(m_deskShown);
+        m_hideAction->setChecked(m_hidden);
     });
     menu->addSeparator();
     menu->addAction(tr("Quit WormholeNotes"), this, &Wormhole::quit);
@@ -117,6 +122,11 @@ Wormhole::~Wormhole()
 void Wormhole::start()
 {
     m_store.load();
+    // Hidden stays hidden across a restart: a recording should not be
+    // interrupted by the hole coming back at sign-in.
+    m_hidden = QSettings().value(QStringLiteral("hidden"), false).toBool();
+    if (m_hidden)
+        m_tray->setToolTip(tr("WormholeNotes (hidden)"));
     m_extension.listen();
     NativeHost::registerForUser();
     for (const QString &key : m_store.deskKeys())
@@ -169,6 +179,10 @@ QColor Wormhole::placeColour(const QString &key) const
 
 void Wormhole::reposition()
 {
+    if (m_hidden) {
+        m_hole->hide();
+        return;
+    }
     if (m_note->isVisible() || m_hole->isDragging())
         return;
     int dpi = 96;
@@ -338,7 +352,8 @@ void Wormhole::createDeskNote(const QString &key)
     connect(desk, &DeskNote::clicked, this, [this, key] { openDeskNote(key); });
     connect(desk, &DeskNote::dropped, this, [this, key] { onDeskNoteDropped(key); });
     m_desk.insert(key, desk);
-    desk->show();
+    if (!m_hidden)
+        desk->show();
 }
 
 void Wormhole::openDeskNote(const QString &key)
@@ -366,7 +381,8 @@ void Wormhole::settleDesk(const QString &key)
     }
     desk->setText(record.sheets.constFirst());
     desk->setColour(placeColour(key));
-    desk->show();
+    if (!m_hidden)
+        desk->show();
 }
 
 void Wormhole::onDeskNoteDropped(const QString &key)
@@ -476,6 +492,24 @@ void Wormhole::openHit(const SearchHit &hit)
         m_note->openAt(center);
     }
     m_note->selectRange(hit.start, hit.length);
+}
+
+void Wormhole::setHidden(bool hidden)
+{
+    m_hidden = hidden;
+    QSettings().setValue(QStringLiteral("hidden"), hidden);
+    m_tray->setToolTip(hidden ? tr("WormholeNotes (hidden)") : QStringLiteral("WormholeNotes"));
+    if (hidden) {
+        putNoteAway();
+        showDeskNotes(false);
+        m_target->hide();
+        for (DeskNote *desk : std::as_const(m_desk))
+            desk->hide();
+    } else {
+        for (DeskNote *desk : std::as_const(m_desk))
+            desk->show();
+    }
+    reposition();
 }
 
 void Wormhole::showDeskNotes(bool shown)
