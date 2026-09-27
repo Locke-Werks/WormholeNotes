@@ -29,6 +29,8 @@ set(WORMHOLENOTES_SOURCES
     src/TearTarget.h
     src/SearchWindow.cpp
     src/SearchWindow.h
+    src/Hotkey.cpp
+    src/Hotkey.h
     src/NativeHost.cpp
     src/NativeHost.h
     src/NoteWindow.cpp

@@ -9,6 +9,7 @@
 class DeskNote;
 class HoleWindow;
 class NoteWindow;
+class Hotkey;
 class SearchWindow;
 struct SearchHit;
 class TearTarget;
@@ -76,6 +77,8 @@ private:
     void showDeskNotes(bool shown);
 
     // Search across every sheet.
+    // Opens Find in Notes, or closes it when it is already open.
+    void toggleSearch();
     void runSearch(const QString &query);
     void openHit(const SearchHit &hit);
     QString placeLabel(const QString &key) const;
@@ -93,6 +96,7 @@ private:
     NoteWindow *m_note = nullptr;
     TearTarget *m_target = nullptr;
     SearchWindow *m_search = nullptr;
+    Hotkey *m_hotkey = nullptr;
     QSystemTrayIcon *m_tray = nullptr;
     QAction *m_showDesk = nullptr;
     bool m_deskShown = false;

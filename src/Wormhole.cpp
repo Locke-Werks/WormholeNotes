@@ -2,6 +2,7 @@
 
 #include "DeskNote.h"
 #include "HoleWindow.h"
+#include "Hotkey.h"
 #include "NoteWindow.h"
 #include "SearchWindow.h"
 #include "TearTarget.h"
@@ -79,11 +80,13 @@ Wormhole::Wormhole(QObject *parent)
     m_tray->setToolTip(QStringLiteral("WormholeNotes"));
     auto *menu = new QMenu;
     menu->addAction(tr("Open Note"), this, &Wormhole::openNote);
-    menu->addAction(tr("Find in Notes..."), this, [this] {
-        putNoteAway();
-        const QScreen *screen = QGuiApplication::screenAt(QCursor::pos());
-        m_search->openAt((screen ? screen : QGuiApplication::primaryScreen())->availableGeometry().center());
-    });
+    // Search reaches from any app on a hotkey, since the tray icon is often
+    // tucked away with the hidden ones.
+    m_hotkey = new Hotkey(this);
+    const QString keys = m_hotkey->registerFirst();
+    connect(m_hotkey, &Hotkey::pressed, this, &Wormhole::toggleSearch);
+    menu->addAction(keys.isEmpty() ? tr("Find in Notes...") : tr("Find in Notes...\t%1").arg(keys), this,
+                    &Wormhole::toggleSearch);
     m_showDesk = menu->addAction(tr("Show Desk Notes"));
     m_showDesk->setCheckable(true);
     connect(m_showDesk, &QAction::triggered, this, &Wormhole::showDeskNotes);
@@ -395,6 +398,17 @@ void Wormhole::onDeskNoteDropped(const QString &key)
     desk->deleteLater();
     if (target.key == m_place.key)
         updateHole();
+}
+
+void Wormhole::toggleSearch()
+{
+    if (m_search->isVisible()) {
+        m_search->hide();
+        return;
+    }
+    putNoteAway();
+    const QScreen *screen = QGuiApplication::screenAt(QCursor::pos());
+    m_search->openAt((screen ? screen : QGuiApplication::primaryScreen())->availableGeometry().center());
 }
 
 QString Wormhole::placeLabel(const QString &key) const
