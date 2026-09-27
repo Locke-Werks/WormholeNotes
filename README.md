@@ -76,6 +76,11 @@ In Chrome, Edge or Brave: open the extensions page, turn on Developer mode,
 choose Load unpacked, and pick the `extension` folder in the install
 directory. WormholeNotes registers itself with those browsers when it starts.
 
+In Firefox: open `about:debugging#/runtime/this-firefox`, choose Load
+Temporary Add-on, and pick `manifest.json` in the `extension` folder. Firefox
+drops a temporary add-on when it closes; a permanent install needs a signed
+copy.
+
 ## Requirements
 
 Windows 11, x64. Windows 10 1809 or later should work.

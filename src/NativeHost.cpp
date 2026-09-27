@@ -28,9 +28,9 @@ namespace {
 const QString kSocket = QStringLiteral("LockeWerks.WormholeNotes.Pages");
 
 // The browser that started us, by its executable name, since the same
-// extension runs in Chrome, Edge and Brave and each is its own place. On
-// Windows the browser starts a host through cmd.exe, so the shell in between
-// is stepped over.
+// extension runs in Chrome, Edge, Brave and Firefox and each is its own place.
+// On Windows a Chromium browser starts a host through cmd.exe, so the shell in
+// between is stepped over.
 QString parentExe()
 {
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -70,7 +70,9 @@ namespace NativeHost {
 
 bool isHostLaunch(int argc, char *argv[])
 {
-    return argc > 1 && qstrncmp(argv[1], "chrome-extension://", 19) == 0;
+    if (argc > 1 && qstrncmp(argv[1], "chrome-extension://", 19) == 0)
+        return true;
+    return argc > 2 && qstrcmp(argv[2], kGeckoId) == 0;
 }
 
 int run()
@@ -107,42 +109,54 @@ int run()
     }
 }
 
+// Writes a host manifest, only when it differs, and points each registry
+// base at it.
+static void registerManifest(const QString &path, const QJsonObject &manifest,
+                             std::initializer_list<const wchar_t *> bases)
+{
+    const QByteArray bytes = QJsonDocument(manifest).toJson();
+    QFile existing(path);
+    if (!existing.open(QIODevice::ReadOnly) || existing.readAll() != bytes) {
+        existing.close();
+        QSaveFile file(path);
+        if (file.open(QIODevice::WriteOnly)) {
+            file.write(bytes);
+            file.commit();
+        }
+    }
+    const std::wstring value = path.toStdWString();
+    for (const wchar_t *base : bases) {
+        const std::wstring key = std::wstring(base) + QString::fromLatin1(kHostName).toStdWString();
+        RegSetKeyValueW(HKEY_CURRENT_USER, key.c_str(), nullptr, REG_SZ, value.c_str(),
+                        DWORD((value.size() + 1) * sizeof(wchar_t)));
+    }
+}
+
 void registerForUser()
 {
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     QDir().mkpath(dir);
-    const QString manifestPath = QDir::toNativeSeparators(dir + QStringLiteral("/native-host.json"));
 
     QJsonObject manifest;
     manifest.insert(QStringLiteral("name"), QString::fromLatin1(kHostName));
     manifest.insert(QStringLiteral("description"), QStringLiteral("WormholeNotes page detection"));
     manifest.insert(QStringLiteral("path"), QDir::toNativeSeparators(QCoreApplication::applicationFilePath()));
     manifest.insert(QStringLiteral("type"), QStringLiteral("stdio"));
-    manifest.insert(QStringLiteral("allowed_origins"),
+
+    // Chromium names the callers it allows by origin and Firefox by add-on
+    // ID, and each rejects the other's key, so they get a manifest apiece.
+    QJsonObject chromium = manifest;
+    chromium.insert(QStringLiteral("allowed_origins"),
                     QJsonArray{ QStringLiteral("chrome-extension://%1/").arg(QString::fromLatin1(kExtensionId)) });
-    const QByteArray bytes = QJsonDocument(manifest).toJson();
+    registerManifest(QDir::toNativeSeparators(dir + QStringLiteral("/native-host.json")), chromium,
+                     { L"Software\\Google\\Chrome\\NativeMessagingHosts\\",
+                       L"Software\\Microsoft\\Edge\\NativeMessagingHosts\\",
+                       L"Software\\BraveSoftware\\Brave-Browser\\NativeMessagingHosts\\" });
 
-    QFile existing(manifestPath);
-    if (!existing.open(QIODevice::ReadOnly) || existing.readAll() != bytes) {
-        existing.close();
-        QSaveFile file(manifestPath);
-        if (file.open(QIODevice::WriteOnly)) {
-            file.write(bytes);
-            file.commit();
-        }
-    }
-
-    static const wchar_t *const browsers[] = {
-        L"Software\\Google\\Chrome\\NativeMessagingHosts\\",
-        L"Software\\Microsoft\\Edge\\NativeMessagingHosts\\",
-        L"Software\\BraveSoftware\\Brave-Browser\\NativeMessagingHosts\\",
-    };
-    const std::wstring value = manifestPath.toStdWString();
-    for (const wchar_t *base : browsers) {
-        const std::wstring key = std::wstring(base) + QString::fromLatin1(kHostName).toStdWString();
-        RegSetKeyValueW(HKEY_CURRENT_USER, key.c_str(), nullptr, REG_SZ, value.c_str(),
-                        DWORD((value.size() + 1) * sizeof(wchar_t)));
-    }
+    QJsonObject firefox = manifest;
+    firefox.insert(QStringLiteral("allowed_extensions"), QJsonArray{ QString::fromLatin1(kGeckoId) });
+    registerManifest(QDir::toNativeSeparators(dir + QStringLiteral("/native-host-firefox.json")), firefox,
+                     { L"Software\\Mozilla\\NativeMessagingHosts\\" });
 }
 
 } // namespace NativeHost
