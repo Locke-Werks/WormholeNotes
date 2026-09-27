@@ -60,7 +60,7 @@ void SheetStore::load()
         return;
     const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
     const QJsonArray last = root.value(QStringLiteral("lastHole")).toArray();
-    if (last.size() == 2)
+    if (last.size() == 2 && last.at(0).toDouble() >= 0 && last.at(1).toDouble() >= 0)
         m_lastHole = QPointF(last.at(0).toDouble(), last.at(1).toDouble());
 
     const int format = root.value(QStringLiteral("format")).toInt(1);
@@ -83,7 +83,7 @@ void SheetStore::load()
         while (record.colours.size() < record.sheets.size())
             record.colours.append(QString());
         const QJsonArray hole = o.value(QStringLiteral("hole")).toArray();
-        if (hole.size() == 2) {
+        if (hole.size() == 2 && hole.at(0).toDouble() >= 0 && hole.at(1).toDouble() >= 0) {
             record.hole = QPointF(hole.at(0).toDouble(), hole.at(1).toDouble());
             record.hasHole = true;
         }

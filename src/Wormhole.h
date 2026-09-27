@@ -9,6 +9,7 @@
 class DeskNote;
 class HoleWindow;
 class NoteWindow;
+class TearTarget;
 class QSystemTrayIcon;
 
 // Ties the pieces together: the tracker says where the user is, the store
@@ -61,7 +62,11 @@ private:
     // or away altogether when nothing is left written on it.
     void settleDesk(const QString &key);
     void onDeskNoteDropped(const QString &key);
-    void tearOff();
+    // Tears the sheet off into a desk note centred near a point, or where the
+    // note is when none is given.
+    void tearOff(const QPoint &at = {});
+    // Tears one sheet of a place off into a desk note centred near a point.
+    void tearOffSheet(const QString &key, int index, QPoint at);
     void onNoteMoved();
 
     PlaceTracker m_tracker;
@@ -75,5 +80,6 @@ private:
     QHash<QString, DeskNote *> m_desk;
     HoleWindow *m_hole = nullptr;
     NoteWindow *m_note = nullptr;
+    TearTarget *m_target = nullptr;
     QSystemTrayIcon *m_tray = nullptr;
 };

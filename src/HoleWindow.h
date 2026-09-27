@@ -27,6 +27,8 @@ public:
 
 Q_SIGNALS:
     void clicked();
+    void dragStarted();
+    void dragging();
     void dragFinished(const QPoint &physicalCenter);
 
 protected:

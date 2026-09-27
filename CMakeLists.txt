@@ -25,6 +25,8 @@ set(WORMHOLENOTES_SOURCES
     src/HoleWindow.h
     src/DeskNote.cpp
     src/DeskNote.h
+    src/TearTarget.cpp
+    src/TearTarget.h
     src/NativeHost.cpp
     src/NativeHost.h
     src/NoteWindow.cpp

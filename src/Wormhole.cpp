@@ -3,6 +3,7 @@
 #include "DeskNote.h"
 #include "HoleWindow.h"
 #include "NoteWindow.h"
+#include "TearTarget.h"
 #include "Theme.h"
 
 #include <QApplication>
@@ -18,6 +19,7 @@ Wormhole::Wormhole(QObject *parent)
 {
     m_hole = new HoleWindow;
     m_note = new NoteWindow;
+    m_target = new TearTarget;
 
     connect(&m_tracker, &PlaceTracker::placeChanged, this, &Wormhole::onPlaceChanged);
     connect(&m_tracker, &PlaceTracker::anchorMoved, this, &Wormhole::reposition);
@@ -28,6 +30,13 @@ Wormhole::Wormhole(QObject *parent)
             updateRing();
     });
     connect(m_hole, &HoleWindow::clicked, this, &Wormhole::openNote);
+    connect(m_hole, &HoleWindow::dragStarted, this, [this] {
+        // A hole with writing behind it can be carried to the tear-off target
+        // too; the sheet it opens on goes to the desktop.
+        if (m_store.place(m_place.key).hasWriting())
+            m_target->appear(m_hole->geometry().center(), placeColour(m_place.key));
+    });
+    connect(m_hole, &HoleWindow::dragging, m_target, &TearTarget::track);
     connect(m_hole, &HoleWindow::dragFinished, this, &Wormhole::onHoleDragged);
     connect(m_note, &NoteWindow::putAwayRequested, this, &Wormhole::putNoteAway);
     connect(m_note, &NoteWindow::quitRequested, this, &Wormhole::quit);
@@ -35,7 +44,12 @@ Wormhole::Wormhole(QObject *parent)
     connect(m_note, &NoteWindow::newSheetRequested, this, &Wormhole::newSheet);
     connect(m_note, &NoteWindow::deleteSheetRequested, this, &Wormhole::deleteSheet);
     connect(m_note, &NoteWindow::placeTurned, this, &Wormhole::turnPlace);
-    connect(m_note, &NoteWindow::tearOffRequested, this, &Wormhole::tearOff);
+    connect(m_note, &NoteWindow::tearOffRequested, this, [this] { tearOff(); });
+    connect(m_note, &NoteWindow::moveStarted, this, [this] {
+        if (!isDesk(m_viewKey))
+            m_target->appear(m_note->geometry().center(), m_note->sheetColour());
+    });
+    connect(m_note, &NoteWindow::moving, m_target, &TearTarget::track);
     connect(m_note, &NoteWindow::moved, this, &Wormhole::onNoteMoved);
     connect(m_note, &NoteWindow::colourChosen, this, [this](const QColor &colour) {
         m_store.setColour(m_viewKey, m_sheet, colour == Theme::accent() ? QString() : colour.name());
@@ -70,6 +84,7 @@ Wormhole::~Wormhole()
 {
     m_store.flush();
     qDeleteAll(m_desk);
+    delete m_target;
     delete m_tray->contextMenu();
     delete m_note;
     delete m_hole;
@@ -358,42 +373,86 @@ void Wormhole::onDeskNoteDropped(const QString &key)
         updateHole();
 }
 
-void Wormhole::tearOff()
+void Wormhole::tearOff(const QPoint &where)
 {
     if (isDesk(m_viewKey))
         return;
-    const QString text = m_note->text();
-    if (text.trimmed().isEmpty())
-        return;
-    const QPoint at = m_note->geometry().center();
-    const QString key = m_store.newDeskNote({ text }, at, { m_store.place(m_viewKey).colours.value(m_sheet) });
-    // The sheet leaves the page, which is left with a fresh blank if that
-    // was its only one.
-    m_store.removeSheet(m_viewKey, m_sheet);
-    m_sheet = qMin(m_sheet, int(m_store.place(m_viewKey).sheets.size()) - 1);
-    m_lastSheet.insert(m_viewKey, m_sheet);
-    createDeskNote(key);
-    putNoteAway();
+    m_store.setSheet(m_viewKey, m_viewLabel, m_sheet, m_note->text());
+    tearOffSheet(m_viewKey, m_sheet, where.isNull() ? m_note->geometry().center() : where);
 }
 
-// A note dropped where only the desktop shows is torn off there. Moving it
-// aside over another window is just moving it.
+void Wormhole::tearOffSheet(const QString &key, int index, QPoint at)
+{
+    const PlaceRecord record = m_store.place(key);
+    if (index < 0 || index >= record.sheets.size() || record.sheets.at(index).trimmed().isEmpty())
+        return;
+    const QString text = record.sheets.at(index);
+    // Not on top of another desk note: step aside until there is room.
+    for (bool crowded = true; crowded;) {
+        crowded = false;
+        for (const DeskNote *desk : std::as_const(m_desk)) {
+            if ((desk->logicalCenter() - at).manhattanLength() < 60) {
+                at.rx() -= 124;
+                crowded = true;
+            }
+        }
+    }
+    const QString desk = m_store.newDeskNote({ text }, at, { record.colours.value(index) });
+    // The sheet leaves the page, which is left with a fresh blank if that
+    // was its only one.
+    m_store.removeSheet(key, index);
+    const int remaining = int(m_store.place(key).sheets.size());
+    m_lastSheet.insert(key, qMin(index, remaining - 1));
+    if (m_note->isVisible() && m_viewKey == key)
+        m_sheet = qMin(m_sheet, remaining - 1);
+    createDeskNote(desk);
+    putNoteAway();
+    updateHole();
+}
+
+// A note dropped on the tear-off target, or where only the desktop shows, is
+// torn off there. Moving it aside over another window is just moving it.
 void Wormhole::onNoteMoved()
 {
+    const bool onTarget = m_target->track();
+    const QPoint target = m_target->geometry().center();
+    m_target->hide();
     if (!m_note->isVisible() || isDesk(m_viewKey))
         return;
+    if (onTarget) {
+        // Just above the target, so the new desk note is seen landing.
+        tearOff(target - QPoint(0, 130));
+        return;
+    }
     if (m_tracker.windowAt(m_note->physicalCenter()) == 0)
         tearOff();
 }
 
 void Wormhole::onHoleDragged(const QPoint &c)
 {
+    const bool onTarget = m_target->track();
+    const QPoint target = m_target->geometry().center();
+    m_target->hide();
+    if (onTarget) {
+        // The hole goes home to its window; the sheet goes to the desktop.
+        tearOffSheet(m_place.key, m_lastSheet.value(m_place.key, 0), target - QPoint(0, 130));
+        reposition();
+        return;
+    }
     int dpi = 96;
     const QRect frame = m_tracker.anchorRect(&dpi);
-    if (frame.isEmpty())
+    if (frame.isEmpty()) {
+        reposition();
         return;
+    }
+    // The hole belongs on its window. Dropped off it, it comes back to the
+    // nearest spot on it rather than hanging in the air beside it.
+    const int margin = qRound(12 * dpi / 96.0);
+    const QPoint inside(qBound(frame.left() + margin, c.x(), frame.right() - margin),
+                        qBound(frame.top() + margin, c.y(), frame.bottom() - margin));
     const qreal scale = dpi / 96.0;
-    m_store.setHole(m_place.key, QPointF((frame.right() - c.x()) / scale, (c.y() - frame.top()) / scale));
+    m_store.setHole(m_place.key,
+                    QPointF((frame.right() - inside.x()) / scale, (inside.y() - frame.top()) / scale));
     reposition();
 }
 

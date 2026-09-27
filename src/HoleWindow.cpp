@@ -119,10 +119,14 @@ void HoleWindow::mouseMoveEvent(QMouseEvent *event)
     if (!m_pressed)
         return;
     const QPoint global = event->globalPosition().toPoint();
-    if (!m_dragging && (global - m_pressGlobal).manhattanLength() >= QApplication::startDragDistance())
+    if (!m_dragging && (global - m_pressGlobal).manhattanLength() >= QApplication::startDragDistance()) {
         m_dragging = true;
-    if (m_dragging)
+        emit dragStarted();
+    }
+    if (m_dragging) {
         move(global - m_pressPos);
+        emit dragging();
+    }
 }
 
 void HoleWindow::mouseReleaseEvent(QMouseEvent *event)

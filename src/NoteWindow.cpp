@@ -782,7 +782,11 @@ void NoteWindow::keyPressEvent(QKeyEvent *event)
 bool NoteWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
 {
     const auto *msg = static_cast<const MSG *>(message);
-    if (msg->message == WM_EXITSIZEMOVE)
+    if (msg->message == WM_ENTERSIZEMOVE)
+        emit moveStarted();
+    else if (msg->message == WM_MOVING)
+        emit moving();
+    else if (msg->message == WM_EXITSIZEMOVE)
         QTimer::singleShot(0, this, &NoteWindow::moved);
     return QWidget::nativeEvent(eventType, message, result);
 }

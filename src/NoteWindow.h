@@ -50,6 +50,7 @@ public:
     void putAway();
     // Its centre, in physical pixels.
     QPoint physicalCenter() const;
+    QColor sheetColour() const { return m_colour; }
 
 Q_SIGNALS:
     void textEdited(const QString &text);
@@ -63,7 +64,9 @@ Q_SIGNALS:
     void deleteSheetRequested();
     void tearOffRequested();
     void colourChosen(const QColor &colour);
-    // The user finished dragging the note by its rim.
+    // Dragging the note by its rim: started, under way, finished.
+    void moveStarted();
+    void moving();
     void moved();
 
 protected:
