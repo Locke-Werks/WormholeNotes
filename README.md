@@ -102,3 +102,11 @@ the round.
 ## License
 
 GPLv3. See [LICENSE](LICENSE).
+
+<!-- lockewerks-site
+tag: Sticky notes per app and site
+- A round sticky note that tunnels through every window
+- Each app and each website keeps its own notes
+- The writing runs along one spiral groove, like a record
+- Stored on this machine, never synced, backed up daily
+-->
