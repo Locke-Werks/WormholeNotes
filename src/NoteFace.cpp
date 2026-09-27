@@ -2,11 +2,9 @@
 
 #include <QApplication>
 #include <QClipboard>
-#include <QFontMetricsF>
 #include <QGuiApplication>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
-#include <QMimeData>
 #include <QPainter>
 #include <QPainterPath>
 #include <QStyleHints>
@@ -80,13 +78,8 @@ void NoteFace::turn(int direction)
     const int page = m_page + direction;
     if (page >= 0 && page < m_layout.pageCount()) {
         showPage(page);
-        // The cursor goes with the page, onto its first line.
-        for (int i = 0; i < m_layout.lines().size(); ++i) {
-            if (m_layout.lines().at(i).page == page) {
-                m_cursor.setPosition(m_layout.lineStart(i));
-                break;
-            }
-        }
+        // The cursor goes with the page, to where its spiral starts.
+        m_cursor.setPosition(m_layout.firstOf(page));
         m_hasGoal = false;
         update();
     } else if (canTurn(direction)) {
@@ -103,7 +96,6 @@ void NoteFace::setColors(const Colors &colors)
 void NoteFace::setTextFont(const QFont &font)
 {
     m_layout.setFont(font);
-    m_layout.setTabStop(QFontMetricsF(font).horizontalAdvance(u' ') * 4);
     relayout();
     cursorMoved();
 }
@@ -148,14 +140,12 @@ void NoteFace::cursorMoved(bool keepGoal)
 
 QRectF NoteFace::controlRect(Control control) const
 {
-    // Two small targets either side of the marker, in the space below the
-    // writing band.
+    // Either side of the middle, where the spiral ends.
     const qreal r = m_layout.diameter() / 2;
-    const qreal y = m_layout.bottom() + (r * 2 - m_layout.bottom()) * 0.32;
-    const qreal size = qMax(18.0, r * 0.13);
-    const qreal gap = r * 0.2;
-    const qreal x = control == Back ? r - gap - size : r + gap;
-    return QRectF(x, y - size / 2, size, size);
+    const qreal hub = m_layout.hubRadius();
+    const qreal size = qMax(16.0, hub * 0.42);
+    const qreal x = control == Back ? r - hub * 0.62 : r + hub * 0.62;
+    return QRectF(x - size / 2, r - size / 2, size, size);
 }
 
 NoteFace::Control NoteFace::controlAt(const QPointF &pos) const
@@ -167,18 +157,11 @@ NoteFace::Control NoteFace::controlAt(const QPointF &pos) const
     return NoControl;
 }
 
-bool NoteFace::insideCircle(const QPointF &pos) const
-{
-    const qreal r = m_layout.diameter() / 2;
-    return QLineF(QPointF(r, r), pos).length() <= r;
-}
-
 void NoteFace::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
-    const qreal d = m_layout.diameter();
-    const qreal r = d / 2;
+    const qreal r = m_layout.diameter() / 2;
     const QPointF c(r, r);
 
     // Paper, a shade deeper towards the rim.
@@ -194,68 +177,61 @@ void NoteFace::paintEvent(QPaintEvent *)
     circle.addEllipse(c, r, r);
     p.setClipPath(circle);
 
-    // Rules under every line the band can hold, like a ruled card.
-    p.setPen(QPen(m_colors.rule, 1));
-    const qreal lh = m_layout.lineHeight();
-    for (qreal y = m_layout.top() + lh; lh > 0 && y <= m_layout.bottom() + 0.5; y += lh) {
-        const qreal dy = std::abs(y - r);
-        if (dy >= r * 0.93)
-            continue;
-        const qreal half = std::sqrt(r * 0.93 * r * 0.93 - dy * dy);
-        p.drawLine(QPointF(r - half, y - 0.5), QPointF(r + half, y - 0.5));
-    }
-
-    m_layout.draw(p, m_page, m_colors.ink, m_colors.selection, m_cursor.selectionStart(), m_cursor.selectionEnd());
+    // The groove the writing follows, faint, like the rule on a card.
+    m_layout.drawGroove(p, m_colors.rule);
+    m_layout.draw(p, m_page, m_colors.ink, m_colors.selection, m_colors.control, m_cursor.selectionStart(),
+                  m_cursor.selectionEnd());
 
     if (hasFocus() && m_caretOn && m_layout.pageOf(m_cursor.position()) == m_page) {
-        const QRectF caret = m_layout.cursorRect(m_cursor.position());
-        p.fillRect(QRectF(caret.left() - 0.5, caret.top() + 1, 2, caret.height() - 2), m_colors.caret);
+        p.setPen(QPen(m_colors.caret, 2, Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(m_layout.caret(m_cursor.position()));
     }
 
-    // The foot: which sheet, which page, and the two ways to turn.
+    // The middle: which sheet, which page, and the two ways to turn.
     const bool pages = m_layout.pageCount() > 1;
     const bool sheets = m_sheetCount > 1;
-    if (pages || sheets || canTurn(1)) {
-        QFont font(QStringLiteral("Segoe UI Variable Text"));
-        font.setPixelSize(qMax(10, qRound(r * 0.075)));
-        font.setWeight(QFont::DemiBold);
+    if (!(pages || sheets || canTurn(1)))
+        return;
+    const qreal hub = m_layout.hubRadius();
+    QFont font(QStringLiteral("Segoe UI Variable Text"));
+    font.setPixelSize(qMax(10, qRound(hub * 0.26)));
+    font.setWeight(QFont::DemiBold);
+    p.setFont(font);
+    p.setPen(m_colors.control);
+    const QRectF back = controlRect(Back);
+    const QRectF on = controlRect(On);
+    const QRectF marker(back.right(), c.y() - hub * 0.2, on.left() - back.right(), hub * 0.4);
+    p.drawText(marker, Qt::AlignCenter, QStringLiteral("%1/%2").arg(m_sheetIndex + 1).arg(m_sheetCount));
+    if (pages) {
+        font.setPixelSize(qMax(8, qRound(hub * 0.17)));
+        font.setWeight(QFont::Normal);
         p.setFont(font);
-        p.setPen(m_colors.control);
-        const QRectF back = controlRect(Back);
-        const QRectF on = controlRect(On);
-        const QRectF marker(back.right(), back.top() - 2, on.left() - back.right(), back.height() / 2 + 6);
-        p.drawText(marker, Qt::AlignCenter, QStringLiteral("%1/%2").arg(m_sheetIndex + 1).arg(m_sheetCount));
-        if (pages) {
-            font.setPixelSize(qMax(9, qRound(r * 0.058)));
-            font.setWeight(QFont::Normal);
-            p.setFont(font);
-            p.drawText(QRectF(marker.left(), marker.bottom() - 4, marker.width(), marker.height()), Qt::AlignCenter,
-                       tr("page %1 of %2").arg(m_page + 1).arg(m_layout.pageCount()));
+        p.drawText(QRectF(c.x() - hub, c.y() + hub * 0.2, 2 * hub, hub * 0.3), Qt::AlignCenter,
+                   tr("page %1 of %2").arg(m_page + 1).arg(m_layout.pageCount()));
+    }
+    for (const Control control : { Back, On }) {
+        const QRectF box = controlRect(control);
+        const bool enabled = canTurn(control == Back ? -1 : 1);
+        if (enabled && m_hover == control) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(m_colors.controlHot);
+            p.drawEllipse(box.center(), box.width() / 2, box.width() / 2);
         }
-        for (const Control control : { Back, On }) {
-            const QRectF box = controlRect(control);
-            const bool enabled = canTurn(control == Back ? -1 : 1);
-            if (enabled && m_hover == control) {
-                p.setPen(Qt::NoPen);
-                p.setBrush(m_colors.controlHot);
-                p.drawEllipse(box.center(), box.width() / 2, box.width() / 2);
-            }
-            QColor ink = m_colors.control;
-            if (!enabled)
-                ink.setAlpha(55);
-            const qreal s = box.width() * 0.2;
-            const qreal dir = control == Back ? -1 : 1;
-            p.setPen(QPen(ink, qMax(1.4, box.width() * 0.09), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-            p.setBrush(Qt::NoBrush);
-            const QPointF m = box.center();
-            // A last sheet with writing on it turns on to a new one: a plus.
-            if (control == On && enabled && m_page == m_layout.pageCount() - 1 && m_sheetIndex == m_sheetCount - 1) {
-                p.drawLine(m + QPointF(-s, 0), m + QPointF(s, 0));
-                p.drawLine(m + QPointF(0, -s), m + QPointF(0, s));
-            } else {
-                p.drawPolyline(QPolygonF({ m + QPointF(-dir * s * 0.6, -s), m + QPointF(dir * s * 0.6, 0),
-                                           m + QPointF(-dir * s * 0.6, s) }));
-            }
+        QColor ink = m_colors.control;
+        if (!enabled)
+            ink.setAlpha(55);
+        const qreal s = box.width() * 0.2;
+        const qreal dir = control == Back ? -1 : 1;
+        p.setPen(QPen(ink, qMax(1.4, box.width() * 0.09), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.setBrush(Qt::NoBrush);
+        const QPointF m = box.center();
+        // A last sheet with writing on it turns on to a new one: a plus.
+        if (control == On && enabled && m_page == m_layout.pageCount() - 1 && m_sheetIndex == m_sheetCount - 1) {
+            p.drawLine(m + QPointF(-s, 0), m + QPointF(s, 0));
+            p.drawLine(m + QPointF(0, -s), m + QPointF(0, s));
+        } else {
+            p.drawPolyline(QPolygonF({ m + QPointF(-dir * s * 0.6, -s), m + QPointF(dir * s * 0.6, 0),
+                                       m + QPointF(-dir * s * 0.6, s) }));
         }
     }
 }
@@ -316,24 +292,35 @@ void NoteFace::deleteSelection()
     cursorMoved();
 }
 
-// Up and down keep to the same x on the neighbouring line, remembering the x
-// they started from so a short line in between does not pull them left.
-void NoteFace::moveLines(int delta, QTextCursor::MoveMode mode)
+// Up and down move a turn out or in along the radius, keeping the angle they
+// started from so a short run in between does not pull them round.
+void NoteFace::moveTurns(int delta, QTextCursor::MoveMode mode)
 {
-    const int line = m_layout.lineAt(m_cursor.position());
-    if (line < 0)
-        return;
+    const int position = m_cursor.position();
     if (!m_hasGoal) {
-        m_goalX = m_layout.cursorX(m_cursor.position());
+        m_goalAngle = m_layout.angleOf(position);
         m_hasGoal = true;
     }
-    const int target = line + delta;
-    if (target < 0)
-        m_cursor.movePosition(QTextCursor::Start, mode);
-    else if (target >= m_layout.lines().size())
-        m_cursor.movePosition(QTextCursor::End, mode);
-    else
-        m_cursor.setPosition(m_layout.positionIn(target, m_goalX), mode);
+    int page = m_layout.pageOf(position);
+    int turn = m_layout.turnOf(position) + delta;
+    if (turn < 0) {
+        if (page == 0) {
+            m_cursor.movePosition(QTextCursor::Start, mode);
+            cursorMoved(true);
+            return;
+        }
+        --page;
+        turn = m_layout.turnCount(page) - 1;
+    } else if (turn >= m_layout.turnCount(page)) {
+        if (page == m_layout.pageCount() - 1) {
+            m_cursor.movePosition(QTextCursor::End, mode);
+            cursorMoved(true);
+            return;
+        }
+        ++page;
+        turn = 0;
+    }
+    m_cursor.setPosition(m_layout.positionOnTurn(page, turn, m_goalAngle), mode);
     cursorMoved(true);
 }
 
@@ -349,6 +336,9 @@ void NoteFace::keyPressEvent(QKeyEvent *event)
     if (event->matches(QKeySequence::Paste)) { paste(); return; }
     if (event->matches(QKeySequence::SelectAll)) { selectAll(); return; }
 
+    const int position = m_cursor.position();
+    const int page = m_layout.pageOf(position);
+    const int onTurn = m_layout.turnOf(position);
     switch (event->key()) {
     case Qt::Key_Left:
         m_cursor.movePosition(ctrl ? QTextCursor::PreviousWord : QTextCursor::PreviousCharacter, mode);
@@ -359,25 +349,23 @@ void NoteFace::keyPressEvent(QKeyEvent *event)
         cursorMoved();
         return;
     case Qt::Key_Up:
-        moveLines(-1, mode);
+        moveTurns(-1, mode);
         return;
     case Qt::Key_Down:
-        moveLines(1, mode);
+        moveTurns(1, mode);
         return;
     case Qt::Key_Home:
-        if (ctrl) {
+        if (ctrl)
             m_cursor.movePosition(QTextCursor::Start, mode);
-        } else if (const int line = m_layout.lineAt(m_cursor.position()); line >= 0) {
-            m_cursor.setPosition(m_layout.lineStart(line), mode);
-        }
+        else
+            m_cursor.setPosition(m_layout.turnStart(page, onTurn), mode);
         cursorMoved();
         return;
     case Qt::Key_End:
-        if (ctrl) {
+        if (ctrl)
             m_cursor.movePosition(QTextCursor::End, mode);
-        } else if (const int line = m_layout.lineAt(m_cursor.position()); line >= 0) {
-            m_cursor.setPosition(m_layout.lineEnd(line), mode);
-        }
+        else
+            m_cursor.setPosition(m_layout.turnEnd(page, onTurn), mode);
         cursorMoved();
         return;
     case Qt::Key_PageUp:
@@ -429,8 +417,10 @@ void NoteFace::inputMethodEvent(QInputMethodEvent *event)
 QVariant NoteFace::inputMethodQuery(Qt::InputMethodQuery query) const
 {
     switch (query) {
-    case Qt::ImCursorRectangle:
-        return m_layout.cursorRect(m_cursor.position()).toRect();
+    case Qt::ImCursorRectangle: {
+        const QLineF caret = m_layout.caret(m_cursor.position());
+        return QRectF(caret.p1(), caret.p2()).normalized().adjusted(-1, -1, 1, 1).toRect();
+    }
     case Qt::ImFont:
         return font();
     case Qt::ImCursorPosition:

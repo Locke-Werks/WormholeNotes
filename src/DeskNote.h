@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CircleLayout.h"
+#include "SpiralLayout.h"
 
 #include <QPoint>
 #include <QTextDocument>
@@ -38,7 +38,7 @@ protected:
 
 private:
     QTextDocument m_doc;
-    CircleLayout m_layout;
+    SpiralLayout m_layout;
     bool m_pressed = false;
     bool m_dragging = false;
     QPoint m_pressGlobal;

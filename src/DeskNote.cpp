@@ -100,7 +100,8 @@ void DeskNote::paintEvent(QPaintEvent *)
     circle.addEllipse(c, face, face);
     p.setClipPath(circle);
     p.translate(c - QPointF(face, face));
-    m_layout.draw(p, 0, dark ? QColor(0xec, 0xe6, 0xf5) : QColor(0x2a, 0x24, 0x33), Qt::transparent, 0, 0);
+    m_layout.draw(p, 0, dark ? QColor(0xec, 0xe6, 0xf5) : QColor(0x2a, 0x24, 0x33), Qt::transparent,
+                  QColor(0x6b, 0x3f, 0xd6), 0, 0);
 }
 
 void DeskNote::mousePressEvent(QMouseEvent *event)

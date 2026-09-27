@@ -31,8 +31,8 @@ set(WORMHOLENOTES_SOURCES
     src/NoteWindow.h
     src/NoteFace.cpp
     src/NoteFace.h
-    src/CircleLayout.cpp
-    src/CircleLayout.h
+    src/SpiralLayout.cpp
+    src/SpiralLayout.h
     src/Round.cpp
     src/Round.h
 )
@@ -75,6 +75,10 @@ enable_testing()
 qt_add_executable(wormhole-store-test tests/store.cpp src/SheetStore.cpp src/SheetStore.h)
 target_link_libraries(wormhole-store-test PRIVATE Qt6::Core)
 add_test(NAME store COMMAND wormhole-store-test)
+qt_add_executable(wormhole-spiral-test tests/spiral.cpp src/SpiralLayout.cpp src/SpiralLayout.h)
+target_link_libraries(wormhole-spiral-test PRIVATE Qt6::Gui)
+# Offscreen, so the test runs on CI with no display.
+add_test(NAME spiral COMMAND wormhole-spiral-test -platform offscreen)
 
 # A console probe of place detection on the real desktop. Not installed.
 qt_add_executable(wormhole-probe
@@ -98,8 +102,8 @@ qt_add_executable(wormhole-render
     src/NoteWindow.h
     src/NoteFace.cpp
     src/NoteFace.h
-    src/CircleLayout.cpp
-    src/CircleLayout.h
+    src/SpiralLayout.cpp
+    src/SpiralLayout.h
     src/Round.cpp
     src/Round.h
 )

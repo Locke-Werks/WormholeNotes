@@ -28,7 +28,7 @@ the new window with that place's notes behind it.
 | Click the hole | The note for this place opens out of it |
 | Drag the hole | It moves; this place remembers where |
 | Drag the binder clip round the rim, or scroll over the rim | The note turns to another open place |
-| The arrows at the foot of the note | The next or previous page, then sheet; past the last, a new sheet |
+| The arrows in the middle of the note | The next or previous page, then sheet; past the last, a new sheet |
 | The pushers on the rim: plus, minus, dot | New sheet, delete sheet, put away |
 | Escape, or switch apps | The note folds back into the hole |
 | Right-click the note | Edit commands, About, Quit |
@@ -37,6 +37,12 @@ the new window with that place's notes behind it.
 A hole with something written behind it glows. An empty one is dark. On the
 rim, a notch marks every open place, bright where something is written, in
 the same order as the taskbar.
+
+The writing runs along one spiral groove, from the rim at noon, clockwise,
+in towards the middle, like a record. A new paragraph leaves a dot in the
+groove rather than breaking it. When the spiral reaches the middle the page
+is full and the next one starts again at the rim. Up and Down move a turn out
+or in.
 
 A place can hold several sheets, one thought each. Blank sheets are never
 kept and close with their page.
