@@ -40,8 +40,8 @@ private:
     void quit();
 
     // The place the note is showing, and which of its sheets.
-    void view(const QString &key, const QString &label, int sheet, bool fromEnd = false);
-    void showSheet(int index, bool fromEnd);
+    void view(const QString &key, const QString &label, int sheet);
+    void showSheet(int index);
     void turnSheet(int direction);
     void newSheet();
     void deleteSheet();

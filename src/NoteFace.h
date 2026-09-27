@@ -10,8 +10,13 @@
 class QTextDocument;
 
 // The paper in the middle of the note: a plain-text editor whose writing runs
-// along one spiral groove from the rim to the centre (see SpiralLayout), with
-// the page and sheet controls in the middle where the spiral ends.
+// along one spiral groove, the newest words at the top of the rim and older
+// ones further in (see SpiralLayout), with the page and sheet controls in the
+// middle where the groove ends.
+//
+// The face turns like a record so the caret is always at the top, the right
+// way up: at the newest end it rests where it is; moved back to fix something
+// further in, it turns until that spot is at the top.
 //
 // Storage, undo and word movement are QTextDocument's and QTextCursor's.
 // Everything to do with where the text sits is its own.
@@ -31,8 +36,8 @@ public:
     QTextCursor textCursor() const { return m_cursor; }
     QString text() const;
     // Replaces the text without it counting as an edit, with the cursor at
-    // the start, or at the end on the last page when fromEnd.
-    void load(const QString &text, bool fromEnd);
+    // the newest end, where writing carries on.
+    void load(const QString &text);
 
     // Which sheet this is among its place's sheets, for the controls in the
     // middle. Turning past the first or last page asks for the next sheet.
@@ -78,6 +83,10 @@ private:
 
     void relayout();
     void cursorMoved(bool keepGoal = false);
+    // Turns the face so the caret comes to the top.
+    void spinToCaret(bool animate = true);
+    // A point on the widget, in the layout's unturned coordinates.
+    QPointF unturned(const QPointF &pos) const;
     void showPage(int page);
     void moveTurns(int delta, QTextCursor::MoveMode mode);
     void insert(const QString &text);
@@ -89,6 +98,8 @@ private:
     SpiralLayout m_layout;
     Colors m_colors;
     int m_page = 0;
+    qreal m_turn = 0; // how far the face is turned, clockwise, in radians
+    class QVariantAnimation *m_spin = nullptr;
     int m_sheetIndex = 0;
     int m_sheetCount = 1;
 

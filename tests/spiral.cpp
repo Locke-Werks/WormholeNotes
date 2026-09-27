@@ -45,7 +45,10 @@ int main(int argc, char *argv[])
     }
     check(clicks, "clicking on a caret position finds that position");
 
-    check(layout.turnOf(0) == 0, "the writing starts on the outer turn");
+    check(layout.turnOf(layout.positionCount()) == 0, "the newest writing is on the outer turn");
+    check(std::abs(layout.screenAngle(layout.positionCount()) - SpiralLayout::anchor()) < 1e-9,
+          "the newest writing ends at the top");
+    check(layout.turnOf(0) >= layout.turnOf(layout.positionCount()), "older writing is further in");
     const int turns = layout.turnCount(0);
     check(turns >= 1, QStringLiteral("the note runs to %1 turn(s)").arg(turns));
     if (turns > 1) {
@@ -61,13 +64,16 @@ int main(int argc, char *argv[])
     doc.setPlainText(longText);
     layout.layout(&doc);
     check(layout.pageCount() > 1, QStringLiteral("long writing runs onto %1 pages").arg(layout.pageCount()));
+    // At every page boundary one side or the other is a space: no word runs
+    // across two pages.
     bool whole = true;
     for (int page = 1; page < layout.pageCount(); ++page) {
         const int first = layout.firstOf(page);
-        if (first > 0 && !longText.at(first - 1).isSpace())
+        if (first > 0 && !longText.at(first - 1).isSpace() && !longText.at(first).isSpace())
             whole = false;
     }
-    check(whole, "every page starts at the start of a word");
+    check(whole, "no word is split between pages");
+    check(layout.pageOf(layout.positionCount()) == layout.pageCount() - 1, "the newest writing is on the last page");
 
     doc.setPlainText(QString());
     layout.layout(&doc);

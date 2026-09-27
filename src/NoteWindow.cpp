@@ -288,10 +288,10 @@ NoteWindow::~NoteWindow()
     saveSettings();
 }
 
-void NoteWindow::setSheet(const QString &label, const QString &text, int index, int count, bool fromEnd)
+void NoteWindow::setSheet(const QString &label, const QString &text, int index, int count)
 {
     m_face->setSheetMarker(index, count);
-    m_face->load(text, fromEnd);
+    m_face->load(text);
     setWindowTitle(label);
     update();
 }

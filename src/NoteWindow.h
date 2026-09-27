@@ -36,9 +36,9 @@ public:
     explicit NoteWindow(QWidget *parent = nullptr);
     ~NoteWindow() override;
 
-    // Loads a sheet, one of count on its place. Its edits come back through
-    // textEdited. fromEnd opens it on its last page, for turning backwards.
-    void setSheet(const QString &label, const QString &text, int index, int count, bool fromEnd = false);
+    // Loads a sheet, one of count on its place, at its newest writing. Its
+    // edits come back through textEdited.
+    void setSheet(const QString &label, const QString &text, int index, int count);
     // The open places, and which one the clip is on.
     void setRing(const QList<RingPlace> &places, int current);
     // The sheet's ring colour, which lights the rim, the bloom and the caret.

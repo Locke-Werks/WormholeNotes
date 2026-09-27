@@ -184,20 +184,20 @@ void Wormhole::openNote()
     m_note->openAt(center);
 }
 
-void Wormhole::view(const QString &key, const QString &label, int sheet, bool fromEnd)
+void Wormhole::view(const QString &key, const QString &label, int sheet)
 {
     m_viewKey = key;
     m_viewLabel = label;
-    showSheet(sheet, fromEnd);
+    showSheet(sheet);
     updateRing();
 }
 
-void Wormhole::showSheet(int index, bool fromEnd)
+void Wormhole::showSheet(int index)
 {
     const PlaceRecord record = m_store.place(m_viewKey);
     m_sheet = qBound(0, index, int(record.sheets.size()) - 1);
     m_lastSheet.insert(m_viewKey, m_sheet);
-    m_note->setSheet(m_viewLabel, record.sheets.at(m_sheet), m_sheet, int(record.sheets.size()), fromEnd);
+    m_note->setSheet(m_viewLabel, record.sheets.at(m_sheet), m_sheet, int(record.sheets.size()));
     m_note->setSheetColour(Theme::sheetColour(record.colours.value(m_sheet)));
 }
 
@@ -222,7 +222,7 @@ void Wormhole::turnSheet(int direction)
     leaveSheet();
     if (leavingBlank && target > m_sheet)
         --target;
-    showSheet(target, direction < 0);
+    showSheet(target);
 }
 
 void Wormhole::newSheet()
@@ -230,17 +230,17 @@ void Wormhole::newSheet()
     const PlaceRecord record = m_store.place(m_viewKey);
     // A blank last sheet already is the new sheet.
     if (record.sheets.constLast().trimmed().isEmpty()) {
-        showSheet(int(record.sheets.size()) - 1, false);
+        showSheet(int(record.sheets.size()) - 1);
         return;
     }
     leaveSheet();
-    showSheet(m_store.addSheet(m_viewKey, m_viewLabel), false);
+    showSheet(m_store.addSheet(m_viewKey, m_viewLabel));
 }
 
 void Wormhole::deleteSheet()
 {
     m_store.removeSheet(m_viewKey, m_sheet);
-    showSheet(qMin(m_sheet, int(m_store.place(m_viewKey).sheets.size()) - 1), false);
+    showSheet(qMin(m_sheet, int(m_store.place(m_viewKey).sheets.size()) - 1));
     updateRing();
 }
 

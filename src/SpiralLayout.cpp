@@ -11,19 +11,34 @@
 
 namespace {
 
-constexpr qreal kTurn = 2 * std::numbers::pi;
-// Inset of the first turn from the rim, as a share of the radius.
+constexpr qreal kPi = std::numbers::pi;
+constexpr qreal kTurn = 2 * kPi;
+// Inset of the outer turn from the rim, as a share of the radius.
 constexpr qreal kInset = 0.05;
-// The spiral stops this far out, as a share of the radius, leaving the
+// The groove stops this far out, as a share of the radius, leaving the
 // centre for the page controls.
 constexpr qreal kCentre = 0.30;
+// Where the newest writing ends: a little past noon, so the word being typed
+// sits across the top of the circle.
+constexpr qreal kAnchor = 0.30;
 
 bool isBreak(QChar ch)
 {
     return ch.isSpace() || ch == QChar::ParagraphSeparator;
 }
 
+qreal wrap(qreal angle)
+{
+    angle = std::fmod(angle, kTurn);
+    return angle < 0 ? angle + kTurn : angle;
+}
+
 } // namespace
+
+qreal SpiralLayout::anchor()
+{
+    return kAnchor;
+}
 
 void SpiralLayout::setFont(const QFont &font)
 {
@@ -35,19 +50,19 @@ void SpiralLayout::setDiameter(qreal diameter)
     m_diameter = diameter;
 }
 
-qreal SpiralLayout::radiusAt(qreal theta) const
+qreal SpiralLayout::radiusAt(qreal t) const
 {
-    return m_outerRadius - m_pitch * theta / kTurn;
+    return m_outerRadius - m_pitch * t / kTurn;
 }
 
-QPointF SpiralLayout::pointAt(qreal theta, qreal offset) const
+QPointF SpiralLayout::pointAt(qreal t, qreal offset) const
 {
     const qreal r = m_diameter / 2;
-    const qreal screen = -std::numbers::pi / 2 + theta;
-    return QPointF(r, r) + QPointF(std::cos(screen), std::sin(screen)) * (radiusAt(theta) + offset);
+    const qreal screen = -kPi / 2 + kAnchor - t;
+    return QPointF(r, r) + QPointF(std::cos(screen), std::sin(screen)) * (radiusAt(t) + offset);
 }
 
-qreal SpiralLayout::maxTheta() const
+qreal SpiralLayout::maxT() const
 {
     return m_pitch > 0 ? (m_outerRadius - m_innerRadius) / m_pitch * kTurn : 0;
 }
@@ -86,39 +101,48 @@ void SpiralLayout::layout(const QTextDocument *document)
         return metrics.horizontalAdvance(ch);
     };
 
-    const qreal end = maxTheta();
-    int page = 0;
-    qreal theta = 0;
-    for (int i = 0; i < text.size(); ++i) {
+    // Laid out backwards from the newest end, so it is the newest writing
+    // that is pinned at the top of the outer turn. Pages are counted
+    // backwards too, then numbered oldest first.
+    const qsizetype n = text.size();
+    m_stops.resize(n + 1);
+    m_glyphs.resize(n);
+    const qreal end = maxT();
+    int back = 0;
+    qreal t = 0;
+    m_stops[n] = { 0, 0 };
+    for (qsizetype i = n - 1; i >= 0; --i) {
         const QChar ch = text.at(i);
-        // A word that would run past the centre starts the next page instead.
-        if (!isBreak(ch) && (i == 0 || isBreak(text.at(i - 1))) && theta > 0) {
+        // Meeting a word at its end: if the whole word would run past the
+        // centre, it goes onto the page before instead.
+        if (!isBreak(ch) && (i == n - 1 || isBreak(text.at(i + 1))) && t > 0) {
             qreal span = 0;
-            for (int j = i; j < text.size() && !isBreak(text.at(j)); ++j)
-                span += widthOf(text.at(j)) / radiusAt(theta + span);
-            if (theta + span > end && span < end) {
-                ++page;
-                theta = 0;
+            for (qsizetype j = i; j >= 0 && !isBreak(text.at(j)); --j)
+                span += widthOf(text.at(j)) / radiusAt(t + span);
+            if (t + span > end && span < end) {
+                ++back;
+                t = 0;
             }
         }
         const qreal width = widthOf(ch);
-        qreal advance = width / radiusAt(theta);
-        if (theta + advance > end && theta > 0) {
-            ++page;
-            theta = 0;
-            advance = width / radiusAt(theta);
+        qreal advance = width / radiusAt(t);
+        if (t + advance > end && t > 0) {
+            ++back;
+            t = 0;
+            advance = width / radiusAt(t);
         }
         Glyph glyph;
         glyph.gap = ch == QChar::ParagraphSeparator;
         if (!glyph.gap && ch != u'\t')
             glyph.text = QString(ch);
         glyph.advance = advance;
-        m_stops.append({ page, theta });
-        m_glyphs.append(glyph);
-        theta += advance;
+        m_glyphs[i] = glyph;
+        t += advance;
+        m_stops[i] = { back, t };
     }
-    m_stops.append({ page, theta });
-    m_pages = page + 1;
+    m_pages = back + 1;
+    for (Stop &stop : m_stops)
+        stop.page = m_pages - 1 - stop.page;
 }
 
 int SpiralLayout::pageOf(int position) const
@@ -132,14 +156,19 @@ int SpiralLayout::turnOf(int position) const
 {
     if (m_stops.isEmpty())
         return 0;
-    return int(std::floor(m_stops.at(qBound(0, position, positionCount())).theta / kTurn));
+    return int(std::floor(m_stops.at(qBound(0, position, positionCount())).t / kTurn));
+}
+
+qreal SpiralLayout::screenAngle(int position) const
+{
+    if (m_stops.isEmpty())
+        return kAnchor;
+    return kAnchor - m_stops.at(qBound(0, position, positionCount())).t;
 }
 
 qreal SpiralLayout::angleOf(int position) const
 {
-    if (m_stops.isEmpty())
-        return 0;
-    return std::fmod(m_stops.at(qBound(0, position, positionCount())).theta, kTurn);
+    return wrap(screenAngle(position));
 }
 
 int SpiralLayout::firstOf(int page) const
@@ -162,16 +191,17 @@ int SpiralLayout::lastOf(int page) const
 
 int SpiralLayout::turnCount(int page) const
 {
-    return turnOf(lastOf(page)) + 1;
+    // The oldest writing on a page is the furthest in.
+    return turnOf(firstOf(page)) + 1;
 }
 
 int SpiralLayout::positionOnTurn(int page, int turn, qreal angle) const
 {
-    const qreal target = angle + turn * kTurn;
-    int best = firstOf(page);
+    const qreal target = turn * kTurn + wrap(kAnchor - angle);
+    int best = lastOf(page);
     qreal bestDistance = -1;
     for (int i = firstOf(page), last = lastOf(page); i <= last; ++i) {
-        const qreal d = std::abs(m_stops.at(i).theta - target);
+        const qreal d = std::abs(m_stops.at(i).t - target);
         if (bestDistance < 0 || d < bestDistance) {
             best = i;
             bestDistance = d;
@@ -183,35 +213,31 @@ int SpiralLayout::positionOnTurn(int page, int turn, qreal angle) const
 int SpiralLayout::turnStart(int page, int turn) const
 {
     for (int i = firstOf(page), last = lastOf(page); i <= last; ++i) {
-        if (m_stops.at(i).theta >= turn * kTurn)
+        if (turnOf(i) == turn)
             return i;
     }
-    return lastOf(page);
+    return firstOf(page);
 }
 
 int SpiralLayout::turnEnd(int page, int turn) const
 {
-    int end = firstOf(page);
-    for (int i = firstOf(page), last = lastOf(page); i <= last; ++i) {
-        if (m_stops.at(i).theta < (turn + 1) * kTurn)
-            end = i;
+    for (int i = lastOf(page), first = firstOf(page); i >= first; --i) {
+        if (turnOf(i) == turn)
+            return i;
     }
-    // At the end of a turn that the text carries on past, the cursor sits
-    // before the last glyph's neighbour rather than on the next turn.
-    return end;
+    return lastOf(page);
 }
 
 int SpiralLayout::positionAt(int page, const QPointF &point) const
 {
     const qreal r = m_diameter / 2;
     const QPointF v = point - QPointF(r, r);
-    qreal angle = std::atan2(v.y(), v.x()) + std::numbers::pi / 2;
-    if (angle < 0)
-        angle += kTurn;
+    const qreal angle = wrap(std::atan2(v.y(), v.x()) + kPi / 2);
     const qreal distance = std::hypot(v.x(), v.y());
-    // radiusAt(angle + turn * kTurn) == distance, solved for the turn.
-    const int turn = qBound(0, int(std::lround((m_outerRadius - distance) / m_pitch - angle / kTurn)),
-                            turnCount(page) - 1);
+    const qreal base = wrap(kAnchor - angle);
+    // radiusAt(base + turn * kTurn) == distance, solved for the turn.
+    const int turn =
+        qBound(0, int(std::lround((m_outerRadius - distance) / m_pitch - base / kTurn)), turnCount(page) - 1);
     return positionOnTurn(page, turn, angle);
 }
 
@@ -219,8 +245,8 @@ QLineF SpiralLayout::caret(int position) const
 {
     if (m_stops.isEmpty())
         return {};
-    const qreal theta = m_stops.at(qBound(0, position, positionCount())).theta;
-    return QLineF(pointAt(theta, -m_pitch * 0.45), pointAt(theta, m_pitch * 0.45));
+    const qreal t = m_stops.at(qBound(0, position, positionCount())).t;
+    return QLineF(pointAt(t, -m_pitch * 0.45), pointAt(t, m_pitch * 0.45));
 }
 
 void SpiralLayout::drawGroove(QPainter &p, const QColor &color) const
@@ -228,9 +254,9 @@ void SpiralLayout::drawGroove(QPainter &p, const QColor &color) const
     if (m_pitch <= 0)
         return;
     QPolygonF groove;
-    const qreal end = maxTheta();
-    for (qreal theta = 0; theta <= end; theta += 0.04)
-        groove.append(pointAt(theta, -m_pitch / 2));
+    const qreal end = maxT();
+    for (qreal t = 0; t <= end; t += 0.04)
+        groove.append(pointAt(t, -m_pitch / 2));
     groove.append(pointAt(end, -m_pitch / 2));
     p.save();
     p.setPen(QPen(color, 1));
@@ -250,13 +276,15 @@ void SpiralLayout::draw(QPainter &p, int page, const QColor &ink, const QColor &
         if (stop.page != page)
             continue;
         const Glyph &glyph = m_glyphs.at(i);
-        const qreal theta = stop.theta;
-        const qreal mid = theta + glyph.advance / 2;
+        // The glyph runs from its older side, at the stop, to its newer side,
+        // an advance nearer the newest end.
+        const qreal older = stop.t;
+        const qreal newer = older - glyph.advance;
+        const qreal mid = older - glyph.advance / 2;
 
         if (i >= selectionStart && i < selectionEnd) {
-            const QPolygonF band({ pointAt(theta, -h), pointAt(theta, h), pointAt(mid, h),
-                                   pointAt(theta + glyph.advance, h), pointAt(theta + glyph.advance, -h),
-                                   pointAt(mid, -h) });
+            const QPolygonF band({ pointAt(older, -h), pointAt(older, h), pointAt(mid, h), pointAt(newer, h),
+                                   pointAt(newer, -h), pointAt(mid, -h) });
             p.setPen(Qt::NoPen);
             p.setBrush(selection);
             p.drawPolygon(band);
@@ -273,7 +301,7 @@ void SpiralLayout::draw(QPainter &p, int page, const QColor &ink, const QColor &
         const qreal width = glyph.advance * radiusAt(mid);
         p.save();
         p.translate(pointAt(mid));
-        p.rotate((-std::numbers::pi / 2 + mid) * 180 / std::numbers::pi + 90);
+        p.rotate((-kPi / 2 + kAnchor - mid) * 180 / kPi + 90);
         p.setPen(ink);
         p.drawText(QPointF(-width / 2, m_baseline), glyph.text);
         p.restore();

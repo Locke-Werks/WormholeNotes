@@ -121,7 +121,8 @@ void DeskNote::paintEvent(QPaintEvent *)
     bloom.setColorAt(1, Theme::withAlpha(m_colour, 0));
     p.fillRect(QRectF(c.x() - face, c.y() - face, 2 * face, 2 * face), bloom);
     p.translate(c - QPointF(face, face));
-    m_layout.draw(p, 0, Theme::textBody(), Qt::transparent, m_colour, 0, 0);
+    // The newest page, the words last written at the top.
+    m_layout.draw(p, m_layout.pageCount() - 1, Theme::textBody(), Qt::transparent, m_colour, 0, 0);
 }
 
 void DeskNote::mousePressEvent(QMouseEvent *event)
