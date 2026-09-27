@@ -112,6 +112,10 @@ void NoteFace::relayout()
 
 void NoteFace::resizeEvent(QResizeEvent *)
 {
+    // Only the circle is the face. The square's corners lie over the rim,
+    // and clicks there belong to the pushers and the clip.
+    const int d = qMin(width(), height());
+    setMask(QRegion(0, 0, d, d, QRegion::Ellipse));
     relayout();
     showPage(m_layout.pageOf(m_cursor.position()));
 }

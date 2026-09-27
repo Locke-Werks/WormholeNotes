@@ -403,6 +403,7 @@ void NoteWindow::resizeEvent(QResizeEvent *)
     const QRect face(qRound(c.x() - side / 2.0), qRound(c.y() - side / 2.0), side, side);
     m_face->setGeometry(face);
     m_band->setGeometry(face);
+    m_band->setMask(QRegion(0, 0, side, side, QRegion::Ellipse));
 }
 
 NoteWindow::Zone NoteWindow::zoneAt(const QPointF &pos, int *index) const
