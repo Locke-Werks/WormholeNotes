@@ -23,8 +23,11 @@ public:
     QPoint logicalCenter() const;
     QPoint physicalCenter() const;
     void centerOn(const QPoint &logical);
-    // Back down to the bottom of the stack, with the desktop.
+    // Back down to the bottom of the stack, with the desktop, unless it has
+    // been brought up to be found.
     void sink();
+    // Brought up above every window, or put back with the desktop.
+    void setRaised(bool raised);
 
 Q_SIGNALS:
     void clicked();
@@ -40,6 +43,7 @@ protected:
 private:
     QTextDocument m_doc;
     QColor m_colour;
+    bool m_raised = false;
     SpiralLayout m_layout;
     bool m_pressed = false;
     bool m_dragging = false;

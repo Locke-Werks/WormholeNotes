@@ -32,6 +32,7 @@ the new window with that place's notes behind it.
 | The pushers on the rim: plus, minus, colour, dot | New sheet, delete sheet, the sheet's ring colour, put away |
 | Escape, or switch apps | The note folds back into the hole |
 | Right-click the note | Edit commands, About, Quit |
+| Tray menu > Show Desk Notes | Desk notes come up above your windows until you switch apps |
 | Drag the rim, or its outer edge | The note moves, or the circle resizes |
 
 A hole with something written behind it glows. An empty one is dark. On the
@@ -55,9 +56,11 @@ kept and close with their page.
 Sheets are stored locally in `%LOCALAPPDATA%\Locke Werks\WormholeNotes\sheets.json`.
 Nothing is synced.
 
-Right-click a note and choose Tear Off to Desktop, or drag it by its rim and
-drop it where only the desktop shows, and it becomes a small round note on the
-desktop. Drag that onto any window to hand its writing to that place.
+Drag a note by its rim, or drag a hole with writing behind it, and a Tear off
+target appears at the foot of the screen; drop it there and the sheet becomes a
+small round note on the desktop. Right-click a note for Tear Off to Desktop,
+too. Desk notes sit under your windows; Show Desk Notes in the tray menu brings
+them up, and dragging one onto any window hands its writing to that place.
 
 ## Browser extension
 

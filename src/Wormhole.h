@@ -10,6 +10,7 @@ class DeskNote;
 class HoleWindow;
 class NoteWindow;
 class TearTarget;
+class QAction;
 class QSystemTrayIcon;
 
 // Ties the pieces together: the tracker says where the user is, the store
@@ -68,6 +69,9 @@ private:
     // Tears one sheet of a place off into a desk note centred near a point.
     void tearOffSheet(const QString &key, int index, QPoint at);
     void onNoteMoved();
+    // Desk notes live under every window. This brings them up to be found,
+    // until the user moves on to another app.
+    void showDeskNotes(bool shown);
 
     PlaceTracker m_tracker;
     ExtensionLink m_extension;
@@ -82,4 +86,6 @@ private:
     NoteWindow *m_note = nullptr;
     TearTarget *m_target = nullptr;
     QSystemTrayIcon *m_tray = nullptr;
+    QAction *m_showDesk = nullptr;
+    bool m_deskShown = false;
 };

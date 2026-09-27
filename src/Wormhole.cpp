@@ -71,6 +71,13 @@ Wormhole::Wormhole(QObject *parent)
     m_tray->setToolTip(QStringLiteral("WormholeNotes"));
     auto *menu = new QMenu;
     menu->addAction(tr("Open Note"), this, &Wormhole::openNote);
+    m_showDesk = menu->addAction(tr("Show Desk Notes"));
+    m_showDesk->setCheckable(true);
+    connect(m_showDesk, &QAction::triggered, this, &Wormhole::showDeskNotes);
+    connect(menu, &QMenu::aboutToShow, this, [this] {
+        m_showDesk->setEnabled(!m_desk.isEmpty());
+        m_showDesk->setChecked(m_deskShown);
+    });
     menu->addSeparator();
     menu->addAction(tr("Quit WormholeNotes"), this, &Wormhole::quit);
     m_tray->setContextMenu(menu);
@@ -108,6 +115,8 @@ void Wormhole::start()
 
 void Wormhole::onPlaceChanged(const Place &place)
 {
+    // Moving on to another app puts shown desk notes back with the desktop.
+    showDeskNotes(false);
     // The tracker skips our own windows, so a change here means the user went
     // to another app; the open note belongs to the place they left.
     putNoteAway();
@@ -308,6 +317,7 @@ void Wormhole::createDeskNote(const QString &key)
     desk->setText(record.sheets.constFirst());
     desk->setColour(placeColour(key));
     desk->centerOn(record.desk);
+    desk->setRaised(m_deskShown);
     connect(desk, &DeskNote::clicked, this, [this, key] { openDeskNote(key); });
     connect(desk, &DeskNote::dropped, this, [this, key] { onDeskNoteDropped(key); });
     m_desk.insert(key, desk);
@@ -371,6 +381,15 @@ void Wormhole::onDeskNoteDropped(const QString &key)
     desk->deleteLater();
     if (target.key == m_place.key)
         updateHole();
+}
+
+void Wormhole::showDeskNotes(bool shown)
+{
+    if (shown == m_deskShown)
+        return;
+    m_deskShown = shown;
+    for (DeskNote *desk : std::as_const(m_desk))
+        desk->setRaised(shown);
 }
 
 void Wormhole::tearOff(const QPoint &where)

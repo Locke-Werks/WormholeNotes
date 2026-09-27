@@ -69,8 +69,19 @@ void DeskNote::centerOn(const QPoint &logical)
 
 void DeskNote::sink()
 {
+    if (m_raised) {
+        SetWindowPos(HWND(winId()), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        return;
+    }
     SetWindowPos(HWND(winId()), HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     SetWindowPos(HWND(winId()), HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+void DeskNote::setRaised(bool raised)
+{
+    m_raised = raised;
+    if (isVisible())
+        sink();
 }
 
 void DeskNote::showEvent(QShowEvent *)
