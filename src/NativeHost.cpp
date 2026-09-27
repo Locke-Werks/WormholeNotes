@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLocalServer>
@@ -27,32 +28,35 @@ namespace {
 const QString kSocket = QStringLiteral("LockeWerks.WormholeNotes.Pages");
 
 // The browser that started us, by its executable name, since the same
-// extension runs in Chrome, Edge and Brave and each is its own place.
+// extension runs in Chrome, Edge and Brave and each is its own place. On
+// Windows the browser starts a host through cmd.exe, so the shell in between
+// is stepped over.
 QString parentExe()
 {
-    const DWORD self = GetCurrentProcessId();
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE)
         return {};
+    struct Process
+    {
+        DWORD parent = 0;
+        QString exe;
+    };
+    QHash<DWORD, Process> processes;
     PROCESSENTRY32W entry{};
     entry.dwSize = sizeof entry;
-    DWORD parent = 0;
-    for (BOOL ok = Process32FirstW(snapshot, &entry); ok; ok = Process32NextW(snapshot, &entry)) {
-        if (entry.th32ProcessID == self) {
-            parent = entry.th32ParentProcessID;
-            break;
-        }
-    }
-    QString exe;
-    entry.dwSize = sizeof entry;
-    for (BOOL ok = Process32FirstW(snapshot, &entry); ok && parent; ok = Process32NextW(snapshot, &entry)) {
-        if (entry.th32ProcessID == parent) {
-            exe = QString::fromWCharArray(entry.szExeFile).toLower();
-            break;
-        }
-    }
+    for (BOOL ok = Process32FirstW(snapshot, &entry); ok; ok = Process32NextW(snapshot, &entry))
+        processes.insert(entry.th32ProcessID,
+                         { entry.th32ParentProcessID, QString::fromWCharArray(entry.szExeFile).toLower() });
     CloseHandle(snapshot);
-    return exe;
+
+    DWORD pid = processes.value(GetCurrentProcessId()).parent;
+    for (int depth = 0; depth < 4 && processes.contains(pid); ++depth) {
+        const Process &process = processes[pid];
+        if (process.exe != QLatin1String("cmd.exe") && process.exe != QLatin1String("conhost.exe"))
+            return process.exe;
+        pid = process.parent;
+    }
+    return {};
 }
 
 bool readExactly(char *buffer, size_t size)
