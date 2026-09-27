@@ -8,7 +8,10 @@
 #include <QJsonObject>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QDateTime>
 #include <QUuid>
+
+#include <algorithm>
 
 namespace {
 
@@ -261,6 +264,72 @@ QStringList SheetStore::deskKeys() const
     }
     keys.sort();
     return keys;
+}
+
+QString SheetStore::backupDirectory() const
+{
+    return QFileInfo(path()).absolutePath() + QStringLiteral("/backups");
+}
+
+QString SheetStore::backupDaily(const QDate &today, int keep)
+{
+    flush();
+    if (!QFile::exists(path()))
+        return {};
+    QDir dir(backupDirectory());
+    dir.mkpath(QStringLiteral("."));
+    const QString name = QStringLiteral("sheets-%1.json").arg(today.toString(Qt::ISODate));
+    QString made;
+    if (!dir.exists(name) && QFile::copy(path(), dir.filePath(name)))
+        made = dir.filePath(name);
+    // The dated names sort by date, so the oldest are at the front.
+    QStringList copies = dir.entryList({ QStringLiteral("sheets-????-??-??.json") }, QDir::Files, QDir::Name);
+    while (copies.size() > keep)
+        dir.remove(copies.takeFirst());
+    return made;
+}
+
+QString SheetStore::exportMarkdown(const std::function<QString(const QString &key)> &label) const
+{
+    struct Entry
+    {
+        QString key;
+        QString name;
+    };
+    QList<Entry> places;
+    QList<Entry> desk;
+    for (auto it = m_places.cbegin(); it != m_places.cend(); ++it) {
+        if (!it->hasWriting())
+            continue;
+        (it->onDesk ? desk : places).append({ it.key(), label(it.key()) });
+    }
+    const auto byName = [](const Entry &a, const Entry &b) { return a.name.compare(b.name, Qt::CaseInsensitive) < 0; };
+    std::sort(places.begin(), places.end(), byName);
+    std::sort(desk.begin(), desk.end(), byName);
+
+    QString out = QStringLiteral("# WormholeNotes\n\nExported %1.\n")
+                      .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm")));
+    const auto section = [&](const Entry &entry) {
+        out += QStringLiteral("\n## %1\n").arg(entry.name);
+        if (entry.name != entry.key && !entry.key.startsWith(QLatin1String("desk:")))
+            out += QStringLiteral("\n`%1`\n").arg(entry.key);
+        const PlaceRecord &record = m_places[entry.key];
+        int shown = 0;
+        for (const QString &sheet : record.sheets) {
+            if (blank(sheet))
+                continue;
+            out += shown++ ? QStringLiteral("\n---\n\n") : QStringLiteral("\n");
+            out += sheet.trimmed() + u'\n';
+        }
+    };
+    for (const Entry &entry : std::as_const(places))
+        section(entry);
+    if (!desk.isEmpty()) {
+        out += QStringLiteral("\n# On the desktop\n");
+        for (const Entry &entry : std::as_const(desk))
+            section(entry);
+    }
+    return out;
 }
 
 QStringList SheetStore::keys() const

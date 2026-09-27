@@ -5,7 +5,10 @@
 #include <QPointF>
 #include <QString>
 #include <QStringList>
+#include <QDate>
 #include <QTimer>
+
+#include <functional>
 
 // Everything kept about one place: its sheets and where its hole sits.
 struct PlaceRecord
@@ -63,6 +66,15 @@ public:
     QStringList deskKeys() const;
     // Every place with a record, desk notes included.
     QStringList keys() const;
+
+    // A dated copy of the sheets file in a backups folder beside it, once a
+    // day, keeping the newest `keep` days. Returns the copy's path when one
+    // was made today by this call.
+    QString backupDaily(const QDate &today = QDate::currentDate(), int keep = 14);
+    QString backupDirectory() const;
+    // Every written sheet as one Markdown document, a section per place,
+    // named by `label`.
+    QString exportMarkdown(const std::function<QString(const QString &key)> &label) const;
     void forget(const QString &key);
 
     // Where a place that has never had a hole gets one: where the last hole

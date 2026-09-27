@@ -97,6 +97,30 @@ int main(int argc, char *argv[])
         check(!third.deskKeys().contains(blank), "a blank desk note is not kept");
     }
 
+    {
+        SheetStore store;
+        store.load();
+        store.setSheet(QStringLiteral("notepad.exe"), QStringLiteral("Notepad"), 0, QStringLiteral("first thought"));
+        const int second = store.addSheet(QStringLiteral("notepad.exe"), QStringLiteral("Notepad"));
+        store.setSheet(QStringLiteral("notepad.exe"), QStringLiteral("Notepad"), second, QStringLiteral("second thought"));
+        const QString md = store.exportMarkdown([](const QString &key) { return key == QLatin1String("notepad.exe") ? QStringLiteral("Notepad") : key; });
+        check(md.contains(QStringLiteral("## Notepad")) && md.contains(QStringLiteral("first thought"))
+                  && md.contains(QStringLiteral("second thought")),
+              "the export has a section per place with its sheets");
+
+        QDir(store.backupDirectory()).removeRecursively();
+        const QDate day(2026, 9, 1);
+        check(!store.backupDaily(day, 3).isEmpty(), "a day's first backup is made");
+        check(store.backupDaily(day, 3).isEmpty(), "a second backup the same day is not");
+        for (int i = 1; i <= 5; ++i)
+            store.backupDaily(day.addDays(i), 3);
+        const QStringList kept = QDir(store.backupDirectory()).entryList({ QStringLiteral("sheets-*.json") }, QDir::Files, QDir::Name);
+        check(kept == (QStringList{ QStringLiteral("sheets-2026-09-04.json"), QStringLiteral("sheets-2026-09-05.json"),
+                                    QStringLiteral("sheets-2026-09-06.json") }),
+              "only the newest days are kept");
+        QDir(store.backupDirectory()).removeRecursively();
+    }
+
     QFile::remove(SheetStore().path());
     return failures == 0 ? 0 : 1;
 }

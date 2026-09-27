@@ -13,6 +13,9 @@
 #include <QMenu>
 #include <QScreen>
 #include <QSettings>
+#include <QFileDialog>
+#include <QSaveFile>
+#include <QStandardPaths>
 
 #include <cmath>
 #include <QSystemTrayIcon>
@@ -91,6 +94,7 @@ Wormhole::Wormhole(QObject *parent)
     m_showDesk = menu->addAction(tr("Show Desk Notes"));
     m_showDesk->setCheckable(true);
     connect(m_showDesk, &QAction::triggered, this, &Wormhole::showDeskNotes);
+    menu->addAction(tr("Export Notes..."), this, &Wormhole::exportNotes);
     m_hideAction = menu->addAction(tr("Hide Wormhole"));
     m_hideAction->setCheckable(true);
     connect(m_hideAction, &QAction::triggered, this, &Wormhole::setHidden);
@@ -122,6 +126,13 @@ Wormhole::~Wormhole()
 void Wormhole::start()
 {
     m_store.load();
+    // A dated copy of the notes each day, so a bad edit or a lost file can be
+    // got back. Checked hourly for the machine that is never restarted.
+    m_store.backupDaily();
+    auto *daily = new QTimer(this);
+    daily->setInterval(60 * 60 * 1000);
+    connect(daily, &QTimer::timeout, this, [this] { m_store.backupDaily(); });
+    daily->start();
     // Hidden stays hidden across a restart: a recording should not be
     // interrupted by the hole coming back at sign-in.
     m_hidden = QSettings().value(QStringLiteral("hidden"), false).toBool();
@@ -414,6 +425,26 @@ void Wormhole::onDeskNoteDropped(const QString &key)
     desk->deleteLater();
     if (target.key == m_place.key)
         updateHole();
+}
+
+void Wormhole::exportNotes()
+{
+    putNoteAway();
+    m_store.flush();
+    const QString suggested = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+        + QStringLiteral("/WormholeNotes-%1.md").arg(QDate::currentDate().toString(Qt::ISODate));
+    const QString path = QFileDialog::getSaveFileName(nullptr, tr("Export Notes"), suggested, tr("Markdown (*.md)"));
+    if (path.isEmpty())
+        return;
+    QSaveFile file(path);
+    if (file.open(QIODevice::WriteOnly)) {
+        file.write(m_store.exportMarkdown([this](const QString &key) { return placeLabel(key); }).toUtf8());
+        if (file.commit()) {
+            m_tray->showMessage(tr("Notes exported"), QDir::toNativeSeparators(path), QSystemTrayIcon::NoIcon, 4000);
+            return;
+        }
+    }
+    m_tray->showMessage(tr("Could not export"), file.errorString(), QSystemTrayIcon::Warning, 6000);
 }
 
 void Wormhole::toggleSearch()

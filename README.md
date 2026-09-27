@@ -34,6 +34,7 @@ the new window with that place's notes behind it.
 | Right-click the note | Edit commands, About, Quit |
 | Tray menu > Show Desk Notes | Desk notes come up above your windows until you switch apps |
 | Tray menu > Find in Notes, or Win+Shift+F | Search every sheet in every place; Enter opens the note at the match. Ctrl+Alt+Shift+F when another program holds Win+Shift+F |
+| Tray menu > Export Notes | Every note in one Markdown file, a section per place |
 | Tray menu > Hide Wormhole | Everything off screen for recording or sharing, until you untick it, restarts included |
 | Drag the rim, or its outer edge | The note moves, or the circle resizes |
 
@@ -57,7 +58,7 @@ A place can hold several sheets, one thought each. Blank sheets are never
 kept and close with their page.
 
 Sheets are stored locally in `%LOCALAPPDATA%\Locke Werks\WormholeNotes\sheets.json`.
-Nothing is synced.
+Nothing is synced. A dated copy is kept in the `backups` folder beside it each day, the last 14 days.
 
 Drag a note by its rim, or drag a hole with writing behind it, and a Tear off
 target appears at the foot of the screen; drop it there and the sheet becomes a

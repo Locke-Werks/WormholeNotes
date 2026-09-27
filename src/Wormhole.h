@@ -82,6 +82,7 @@ private:
     // Search across every sheet.
     // Opens Find in Notes, or closes it when it is already open.
     void toggleSearch();
+    void exportNotes();
     void runSearch(const QString &query);
     void openHit(const SearchHit &hit);
     QString placeLabel(const QString &key) const;
