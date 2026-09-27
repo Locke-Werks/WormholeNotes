@@ -134,6 +134,7 @@ private:
     int m_zoom = 100;
 
     int m_hoverPusher = -1;
+    bool m_hoverEdge = false;
     int m_pressedPusher = -1;
     bool m_resizing = false;
     QPointF m_resizeCenter;

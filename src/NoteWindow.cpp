@@ -29,7 +29,9 @@
 namespace {
 
 constexpr int kMargin = 16; // room outside the rim for the shadow and the clip
-constexpr int kEdgeGrip = 5;
+// The resize grip is a band just outside the rim, so the whole rim moves the
+// note and resizing is a deliberate reach for its edge.
+constexpr int kEdgeGrip = 8;
 constexpr int kMinRadius = 120;
 constexpr int kDefaultRadius = 210;
 constexpr int kMinZoom = 50;
@@ -412,7 +414,7 @@ NoteWindow::Zone NoteWindow::zoneAt(const QPointF &pos, int *index) const
         return Zone::Clip;
     const qreal d = QLineF(center(), pos).length();
     if (d > m_radius)
-        return Zone::Outside;
+        return d <= m_radius + kEdgeGrip ? Zone::Edge : Zone::Outside;
     if (d < faceRadius())
         return Zone::Face;
     for (int i = 0; i < PusherCount; ++i) {
@@ -422,8 +424,6 @@ NoteWindow::Zone NoteWindow::zoneAt(const QPointF &pos, int *index) const
             return Zone::Pusher;
         }
     }
-    if (d >= m_radius - kEdgeGrip)
-        return Zone::Edge;
     return Zone::Rim;
 }
 
@@ -532,6 +532,14 @@ void NoteWindow::paintEvent(QPaintEvent *)
     const qreal span = Round::radians(78);
     Round::arcText(p, c, rimMid(), Round::kNoon - Round::radians(26), Round::fitArc(name, font, rimMid(), span),
                    font, m_clipDragging ? Theme::textPrimary() : Theme::textLabel());
+
+    // The edge, lit while it is under the pointer or being pulled, so a
+    // resize is never a surprise.
+    if (m_hoverEdge || m_resizing) {
+        p.setPen(QPen(Theme::withAlpha(m_colour, m_resizing ? 220 : 150), 2));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(c, r + 3, r + 3);
+    }
 
     for (int i = 0; i < PusherCount; ++i)
         drawPusher(p, Pusher(i));
@@ -684,8 +692,10 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
     int index = -1;
     const Zone zone = zoneAt(event->position(), &index);
     const int pusher = zone == Zone::Pusher ? index : -1;
-    if (pusher != m_hoverPusher) {
+    const bool edge = zone == Zone::Edge;
+    if (pusher != m_hoverPusher || edge != m_hoverEdge) {
         m_hoverPusher = pusher;
+        m_hoverEdge = edge;
         update();
     }
     if (zone == Zone::Edge) {
@@ -716,6 +726,7 @@ void NoteWindow::mouseReleaseEvent(QMouseEvent *event)
 {
     if (m_resizing) {
         m_resizing = false;
+        update();
         return;
     }
     if (m_clipDragging) {
@@ -740,8 +751,9 @@ void NoteWindow::mouseReleaseEvent(QMouseEvent *event)
 
 void NoteWindow::leaveEvent(QEvent *)
 {
-    if (m_hoverPusher != -1) {
+    if (m_hoverPusher != -1 || m_hoverEdge) {
         m_hoverPusher = -1;
+        m_hoverEdge = false;
         update();
     }
 }

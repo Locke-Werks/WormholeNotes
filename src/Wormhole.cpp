@@ -7,7 +7,11 @@
 #include "Theme.h"
 
 #include <QApplication>
+#include <QGuiApplication>
 #include <QMenu>
+#include <QScreen>
+
+#include <cmath>
 #include <QSystemTrayIcon>
 
 #define NOMINMAX
@@ -406,14 +410,26 @@ void Wormhole::tearOffSheet(const QString &key, int index, QPoint at)
     if (index < 0 || index >= record.sheets.size() || record.sheets.at(index).trimmed().isEmpty())
         return;
     const QString text = record.sheets.at(index);
-    // Not on top of another desk note: step aside until there is room.
-    for (bool crowded = true; crowded;) {
-        crowded = false;
+    // Not on top of another desk note: the first free spot along a spiral out
+    // from where it was dropped, kept on the screen.
+    const QScreen *screen = QGuiApplication::screenAt(at);
+    const QRect area = (screen ? screen : QGuiApplication::primaryScreen())->availableGeometry().adjusted(60, 60, -60, -60);
+    const QPoint origin = at;
+    for (int step = 0; step < 200; ++step) {
+        const qreal angle = step * 0.9;
+        const qreal reach = 22.0 * std::sqrt(qreal(step)) * 5;
+        const QPoint candidate(qBound(area.left(), qRound(origin.x() + reach * std::cos(angle)), area.right()),
+                               qBound(area.top(), qRound(origin.y() + reach * std::sin(angle)), area.bottom()));
+        bool free = true;
         for (const DeskNote *desk : std::as_const(m_desk)) {
-            if ((desk->logicalCenter() - at).manhattanLength() < 60) {
-                at.rx() -= 124;
-                crowded = true;
+            if (QLineF(desk->logicalCenter(), candidate).length() < 118) {
+                free = false;
+                break;
             }
+        }
+        if (free) {
+            at = candidate;
+            break;
         }
     }
     const QString desk = m_store.newDeskNote({ text }, at, { record.colours.value(index) });
