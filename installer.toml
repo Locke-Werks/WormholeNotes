@@ -88,12 +88,13 @@ name   = "WormholeNotes"
 when   = "start_menu"
 
 # No hive: it follows the install scope, so this is the machine-wide Run key
-# and starts WormholeNotes for everyone who signs in.
+# and starts WormholeNotes for everyone who signs in. --sign-in lets each
+# user turn it off in the settings without an administrator.
 [[actions]]
 type       = "registry_write"
 key        = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
 name       = "WormholeNotes"
-value      = '"{InstallDir}\WormholeNotes.exe"'
+value      = '"{InstallDir}\WormholeNotes.exe" --sign-in'
 value_type = "sz"
 when       = "sign_in"
 

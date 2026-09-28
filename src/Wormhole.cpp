@@ -5,6 +5,7 @@
 #include "Hotkey.h"
 #include "NoteWindow.h"
 #include "SearchWindow.h"
+#include "SignIn.h"
 #include "TearTarget.h"
 #include "Theme.h"
 #include "Updater.h"
@@ -88,10 +89,9 @@ Wormhole::Wormhole(QObject *parent)
     // Search reaches from any app on a hotkey, since the tray icon is often
     // tucked away with the hidden ones.
     m_hotkey = new Hotkey(this);
-    const QString keys = m_hotkey->registerFirst();
     connect(m_hotkey, &Hotkey::pressed, this, &Wormhole::toggleSearch);
-    menu->addAction(keys.isEmpty() ? tr("Find in Notes...") : tr("Find in Notes...\t%1").arg(keys), this,
-                    &Wormhole::toggleSearch);
+    m_findAction = menu->addAction(QString(), this, &Wormhole::toggleSearch);
+    applyHotkey();
     m_showDesk = menu->addAction(tr("Show Desk Notes"));
     m_showDesk->setCheckable(true);
     connect(m_showDesk, &QAction::triggered, this, &Wormhole::showDeskNotes);
@@ -107,6 +107,14 @@ Wormhole::Wormhole(QObject *parent)
         m_hideAction->setChecked(m_hidden);
     });
     menu->addSeparator();
+    m_settings = new SettingsWindow;
+    connect(m_settings, &SettingsWindow::stepped, this, &Wormhole::stepSetting);
+    menu->addAction(tr("Settings..."), this, [this] {
+        putNoteAway();
+        m_settings->setRows(settingRows());
+        const QScreen *screen = QGuiApplication::screenAt(QCursor::pos());
+        m_settings->openAt((screen ? screen : QGuiApplication::primaryScreen())->availableGeometry().center());
+    });
     m_updater = new Updater(this);
     m_updateAction = menu->addAction(QString(), m_updater, &Updater::install);
     m_updateAction->setVisible(false);
@@ -139,6 +147,7 @@ Wormhole::~Wormhole()
     qDeleteAll(m_desk);
     delete m_target;
     delete m_search;
+    delete m_settings;
     delete m_tray->contextMenu();
     delete m_note;
     delete m_hole;
@@ -146,6 +155,8 @@ Wormhole::~Wormhole()
 
 void Wormhole::start()
 {
+    // Before anything is drawn in it.
+    Theme::setDefaultRing(QColor(QSettings().value(QStringLiteral("look/ring")).toString()));
     m_store.load();
     // A dated copy of the notes each day, so a bad edit or a lost file can be
     // got back. Checked hourly for the machine that is never restarted.
@@ -505,6 +516,122 @@ void Wormhole::exportNotes()
         }
     }
     notify(tr("Could not export"), file.errorString(), true, 6000);
+}
+
+// ---------------------------------------------------------------------------
+// Settings
+
+namespace {
+
+const QString kHotkeySetting = QStringLiteral("search/hotkey");
+const QString kHotkeyOff = QStringLiteral("off");
+
+struct NoteSize
+{
+    const char *name;
+    int radius;
+};
+constexpr NoteSize kNoteSizes[] = { { "Small", 160 }, { "Medium", 210 }, { "Large", 270 } };
+
+} // namespace
+
+void Wormhole::applyHotkey()
+{
+    // Nothing chosen yet: the first combination Windows grants.
+    const QSettings settings;
+    m_hotkeyNote.clear();
+    if (!settings.contains(kHotkeySetting)) {
+        m_hotkey->registerFirst();
+    } else if (const QString keys = settings.value(kHotkeySetting).toString(); keys != kHotkeyOff) {
+        if (!m_hotkey->registerKeys(keys))
+            m_hotkeyNote = tr("%1 is held by another program").arg(keys);
+    } else {
+        m_hotkey->registerKeys(QString());
+    }
+    m_findAction->setText(m_hotkey->keys().isEmpty() ? tr("Find in Notes...")
+                                                     : tr("Find in Notes...\t%1").arg(m_hotkey->keys()));
+}
+
+QList<SettingsWindow::Row> Wormhole::settingRows() const
+{
+    QList<SettingsWindow::Row> rows;
+    rows.append({ tr("Find in Notes"), m_hotkey->keys().isEmpty() ? tr("Off") : m_hotkey->keys(), {}, m_hotkeyNote });
+    rows.append({ tr("Start at sign-in"), SignIn::enabled() ? tr("On") : tr("Off"), {}, {} });
+
+    const QColor ring = Theme::defaultRing();
+    QString colourName = ring.name();
+    for (const Theme::Family &family : Theme::families()) {
+        if (family.colour == ring)
+            colourName = family.name;
+    }
+    rows.append({ tr("Ring colour"), colourName, ring, {} });
+
+    QString size = tr("Custom");
+    for (const NoteSize &s : kNoteSizes) {
+        if (s.radius == m_note->openingRadius())
+            size = tr(s.name);
+    }
+    rows.append({ tr("Note size"), size, {}, {} });
+    return rows;
+}
+
+void Wormhole::stepSetting(int row, int direction)
+{
+    const auto step = [direction](int current, int count) { return ((current + direction) % count + count) % count; };
+    switch (row) {
+    case 0: {
+        // Every combination, then off. One another program holds is passed
+        // over, and the row says which.
+        QStringList options = Hotkey::choices();
+        options.append(QString());
+        int index = int(options.indexOf(m_hotkey->keys()));
+        if (index < 0)
+            index = int(options.size()) - 1;
+        QStringList taken;
+        for (int tries = 0; tries < options.size(); ++tries) {
+            index = step(index, int(options.size()));
+            if (m_hotkey->registerKeys(options.at(index)))
+                break;
+            taken.append(options.at(index));
+        }
+        QSettings().setValue(kHotkeySetting, m_hotkey->keys().isEmpty() ? kHotkeyOff : m_hotkey->keys());
+        m_findAction->setText(m_hotkey->keys().isEmpty() ? tr("Find in Notes...")
+                                                         : tr("Find in Notes...\t%1").arg(m_hotkey->keys()));
+        m_hotkeyNote = taken.isEmpty() ? QString() : tr("%1 is held by another program").arg(taken.join(QStringLiteral(", ")));
+        break;
+    }
+    case 1:
+        SignIn::setEnabled(!SignIn::enabled());
+        break;
+    case 2: {
+        const QList<Theme::Family> &families = Theme::families();
+        int index = 0;
+        for (int i = 0; i < families.size(); ++i) {
+            if (families.at(i).colour == Theme::defaultRing())
+                index = i;
+        }
+        const QColor colour = families.at(step(index, int(families.size()))).colour;
+        Theme::setDefaultRing(colour);
+        QSettings().setValue(QStringLiteral("look/ring"), colour.name());
+        // Everything already drawn in the old default takes the new one.
+        updateHole();
+        for (auto it = m_desk.cbegin(); it != m_desk.cend(); ++it)
+            (*it)->setColour(placeColour(it.key()));
+        break;
+    }
+    case 3: {
+        int index = 1;
+        for (int i = 0; i < int(std::size(kNoteSizes)); ++i) {
+            if (kNoteSizes[i].radius == m_note->openingRadius())
+                index = i;
+        }
+        m_note->setOpeningRadius(kNoteSizes[step(index, int(std::size(kNoteSizes)))].radius);
+        break;
+    }
+    default:
+        return;
+    }
+    m_settings->setRows(settingRows());
 }
 
 void Wormhole::notify(const QString &title, const QString &text, bool warning, int ms, bool update)

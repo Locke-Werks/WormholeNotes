@@ -45,6 +45,10 @@ public:
     void selectRange(int start, int length);
     // The sheet's ring colour, which lights the rim, the bloom and the caret.
     void setSheetColour(const QColor &colour);
+    // The size the note opens at, as its radius. Resizing by the edge sets
+    // it too.
+    int openingRadius() const { return m_restoreRadius; }
+    void setOpeningRadius(int radius);
     QString text() const;
     // Opens the circle centred on a point in logical screen coordinates,
     // pulled in as far as needed to stay on that screen.

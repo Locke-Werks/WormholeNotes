@@ -41,8 +41,12 @@ struct Family
     QColor colour;
 };
 const QList<Family> &families();
-// A sheet's stored colour, or the accent when it has none.
+// A sheet's stored colour, or the default ring colour when it has none.
 QColor sheetColour(const QString &stored);
+// The ring colour of every sheet not given one of its own; cyan, the
+// accent, unless changed in the settings.
+void setDefaultRing(const QColor &colour);
+QColor defaultRing();
 QColor withAlpha(QColor colour, int alpha);
 
 // Loads the bundled faces. Each role falls back to a system face when its

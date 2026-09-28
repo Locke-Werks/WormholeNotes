@@ -45,6 +45,10 @@ set(WORMHOLENOTES_SOURCES
     src/Round.h
     src/Updater.cpp
     src/Updater.h
+    src/SettingsWindow.cpp
+    src/SettingsWindow.h
+    src/SignIn.cpp
+    src/SignIn.h
 )
 
 if(WIN32)

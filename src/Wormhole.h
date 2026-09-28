@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PlaceTracker.h"
+#include "SettingsWindow.h"
 #include "SheetStore.h"
 
 #include <QHash>
@@ -87,6 +88,11 @@ private:
     void exportNotes();
     void fillRestoreMenu();
     void restoreNotes(const QString &path, const QString &name);
+    // Registers the search hotkey the settings name, or the first free one
+    // when none is chosen, and labels the tray's Find item with it.
+    void applyHotkey();
+    QList<SettingsWindow::Row> settingRows() const;
+    void stepSetting(int row, int direction);
     // A tray notification; `update` marks the one offering an update, which a
     // click installs.
     void notify(const QString &title, const QString &text, bool warning, int ms, bool update = false);
@@ -108,6 +114,10 @@ private:
     TearTarget *m_target = nullptr;
     SearchWindow *m_search = nullptr;
     Hotkey *m_hotkey = nullptr;
+    QAction *m_findAction = nullptr;
+    // Why the chosen hotkey is not in effect, shown under it in the settings.
+    QString m_hotkeyNote;
+    SettingsWindow *m_settings = nullptr;
     QSystemTrayIcon *m_tray = nullptr;
     QAction *m_showDesk = nullptr;
     QMenu *m_restoreMenu = nullptr;

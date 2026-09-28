@@ -49,10 +49,26 @@ const QList<Family> &families()
     return all;
 }
 
+static QColor &defaultRingColour()
+{
+    static QColor colour = accent();
+    return colour;
+}
+
+void setDefaultRing(const QColor &colour)
+{
+    defaultRingColour() = colour.isValid() ? colour : accent();
+}
+
+QColor defaultRing()
+{
+    return defaultRingColour();
+}
+
 QColor sheetColour(const QString &stored)
 {
     const QColor colour(stored);
-    return colour.isValid() ? colour : accent();
+    return colour.isValid() ? colour : defaultRing();
 }
 
 void loadFonts()

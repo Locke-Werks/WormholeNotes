@@ -911,6 +911,12 @@ void NoteWindow::loadSettings()
     m_radius = m_restoreRadius;
 }
 
+void NoteWindow::setOpeningRadius(int radius)
+{
+    m_restoreRadius = radius;
+    QSettings().setValue(QStringLiteral("note/radius"), radius);
+}
+
 void NoteWindow::saveSettings() const
 {
     QSettings settings;
