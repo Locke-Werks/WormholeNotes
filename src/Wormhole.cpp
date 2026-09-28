@@ -7,6 +7,7 @@
 #include "SearchWindow.h"
 #include "TearTarget.h"
 #include "Theme.h"
+#include "Updater.h"
 
 #include <QApplication>
 #include <QGuiApplication>
@@ -106,6 +107,24 @@ Wormhole::Wormhole(QObject *parent)
         m_hideAction->setChecked(m_hidden);
     });
     menu->addSeparator();
+    m_updater = new Updater(this);
+    m_updateAction = menu->addAction(QString(), m_updater, &Updater::install);
+    m_updateAction->setVisible(false);
+    menu->addAction(tr("Check for Updates"), m_updater, &Updater::checkNow);
+    connect(m_updater, &Updater::found, this, [this](const QString &version) {
+        m_updateAction->setText(Updater::isInstalledCopy() ? tr("Update to %1...").arg(version)
+                                                           : tr("Get %1...").arg(version));
+        m_updateAction->setVisible(true);
+        notify(tr("WormholeNotes %1 is out").arg(version), tr("Click here, or choose it from the tray menu."), false,
+               8000, true);
+    });
+    connect(m_updater, &Updater::message, this,
+            [this](const QString &title, const QString &text, bool warning) { notify(title, text, warning, 6000); });
+    connect(m_tray, &QSystemTrayIcon::messageClicked, this, [this] {
+        if (std::exchange(m_updateShown, false))
+            m_updater->install();
+    });
+    menu->addSeparator();
     menu->addAction(tr("Quit WormholeNotes"), this, &Wormhole::quit);
     m_tray->setContextMenu(menu);
     connect(m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
@@ -142,6 +161,7 @@ void Wormhole::start()
         m_tray->setToolTip(tr("WormholeNotes (hidden)"));
     m_extension.listen();
     NativeHost::registerForUser();
+    m_updater->start();
     for (const QString &key : m_store.deskKeys())
         createDeskNote(key);
     m_tray->show();
@@ -453,8 +473,7 @@ void Wormhole::restoreNotes(const QString &path, const QString &name)
     showDeskNotes(false);
     m_search->hide();
     if (!m_store.restore(path)) {
-        m_tray->showMessage(tr("Could not restore"), tr("The backup from %1 could not be read.").arg(name),
-                            QSystemTrayIcon::Warning, 6000);
+        notify(tr("Could not restore"), tr("The backup from %1 could not be read.").arg(name), true, 6000);
         return;
     }
     qDeleteAll(m_desk);
@@ -464,9 +483,8 @@ void Wormhole::restoreNotes(const QString &path, const QString &name)
     m_lastSheet.clear();
     updateHole();
     reposition();
-    m_tray->showMessage(tr("Notes restored"),
-                        tr("Back to %1. The notes it replaced are first under Restore Notes.").arg(name),
-                        QSystemTrayIcon::NoIcon, 6000);
+    notify(tr("Notes restored"), tr("Back to %1. The notes it replaced are first under Restore Notes.").arg(name),
+           false, 6000);
 }
 
 void Wormhole::exportNotes()
@@ -482,11 +500,23 @@ void Wormhole::exportNotes()
     if (file.open(QIODevice::WriteOnly)) {
         file.write(m_store.exportMarkdown([this](const QString &key) { return placeLabel(key); }).toUtf8());
         if (file.commit()) {
-            m_tray->showMessage(tr("Notes exported"), QDir::toNativeSeparators(path), QSystemTrayIcon::NoIcon, 4000);
+            notify(tr("Notes exported"), QDir::toNativeSeparators(path), false, 4000);
             return;
         }
     }
-    m_tray->showMessage(tr("Could not export"), file.errorString(), QSystemTrayIcon::Warning, 6000);
+    notify(tr("Could not export"), file.errorString(), true, 6000);
+}
+
+void Wormhole::notify(const QString &title, const QString &text, bool warning, int ms, bool update)
+{
+    m_updateShown = update;
+    // Windows silently drops a tray message sent with no icon, and one whose
+    // icon is the full multi-size .ico, so an ordinary message carries the
+    // app's icon as a single 32 px image.
+    if (warning)
+        m_tray->showMessage(title, text, QSystemTrayIcon::Warning, ms);
+    else
+        m_tray->showMessage(title, text, QIcon(QApplication::windowIcon().pixmap(32)), ms);
 }
 
 void Wormhole::toggleSearch()

@@ -10,6 +10,7 @@ class DeskNote;
 class HoleWindow;
 class NoteWindow;
 class Hotkey;
+class Updater;
 class SearchWindow;
 struct SearchHit;
 class TearTarget;
@@ -86,6 +87,9 @@ private:
     void exportNotes();
     void fillRestoreMenu();
     void restoreNotes(const QString &path, const QString &name);
+    // A tray notification; `update` marks the one offering an update, which a
+    // click installs.
+    void notify(const QString &title, const QString &text, bool warning, int ms, bool update = false);
     void runSearch(const QString &query);
     void openHit(const SearchHit &hit);
     QString placeLabel(const QString &key) const;
@@ -107,6 +111,11 @@ private:
     QSystemTrayIcon *m_tray = nullptr;
     QAction *m_showDesk = nullptr;
     QMenu *m_restoreMenu = nullptr;
+    Updater *m_updater = nullptr;
+    QAction *m_updateAction = nullptr;
+    // A click on the tray's notification installs the update only when the
+    // notification showing is the one offering it.
+    bool m_updateShown = false;
     bool m_deskShown = false;
     QAction *m_hideAction = nullptr;
     bool m_hidden = false;

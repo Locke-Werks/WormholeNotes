@@ -43,6 +43,8 @@ set(WORMHOLENOTES_SOURCES
     src/SpiralLayout.h
     src/Round.cpp
     src/Round.h
+    src/Updater.cpp
+    src/Updater.h
 )
 
 if(WIN32)
@@ -82,8 +84,9 @@ endif()
 
 # dwmapi for the visible frame and cloaking of the window the hole rides on,
 # ole32 and oleaut32 for UI Automation.
-# Network for the local socket the extension's host relays through.
-target_link_libraries(WormholeNotes PRIVATE Qt6::Widgets Qt6::Network dwmapi ole32 oleaut32)
+# Network for the local socket the extension's host relays through and the
+# update check; wintrust and crypt32 to check an update's signature.
+target_link_libraries(WormholeNotes PRIVATE Qt6::Widgets Qt6::Network dwmapi ole32 oleaut32 wintrust crypt32)
 
 install(TARGETS WormholeNotes RUNTIME DESTINATION .)
 # The browser extension, for loading unpacked until it is in a store.
@@ -99,9 +102,12 @@ qt_add_executable(wormhole-spiral-test tests/spiral.cpp src/SpiralLayout.cpp src
 target_link_libraries(wormhole-spiral-test PRIVATE Qt6::Gui)
 # Offscreen, so the test runs on CI with no display.
 add_test(NAME spiral COMMAND wormhole-spiral-test -platform offscreen)
+qt_add_executable(wormhole-updater-test tests/updater.cpp src/Updater.cpp src/Updater.h)
+target_link_libraries(wormhole-updater-test PRIVATE Qt6::Gui Qt6::Network wintrust crypt32)
+add_test(NAME updater COMMAND wormhole-updater-test -platform offscreen)
 # Another app's Qt on PATH would otherwise be loaded ahead of the one built
 # against, and a mismatched Qt6Gui fails fast before main.
-set_tests_properties(store spiral PROPERTIES
+set_tests_properties(store spiral updater PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
 # A console probe of place detection on the real desktop. Not installed.
