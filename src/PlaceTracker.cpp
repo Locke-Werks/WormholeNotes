@@ -202,6 +202,12 @@ bool PlaceTracker::describe(quintptr h, Window *w, bool forRing) const
     if (!hwnd || !IsWindow(hwnd))
         return false;
     hwnd = GetAncestor(hwnd, GA_ROOT);
+    // A menu, dialog or popup belongs to the window that owns it, so the hole
+    // stays on that window instead of landing on the popup. The walk stops at
+    // an owner nobody can see, which some frameworks keep behind their main
+    // window.
+    for (HWND owner = GetWindow(hwnd, GW_OWNER); owner && IsWindowVisible(owner); owner = GetWindow(owner, GW_OWNER))
+        hwnd = owner;
 
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
@@ -221,15 +227,23 @@ bool PlaceTracker::describe(quintptr h, Window *w, bool forRing) const
     if (cloaked)
         return false;
 
+    // Only a real window is a place, for the hole as for the ring: what
+    // Alt+Tab would show. An unowned window, or one that asks for a taskbar
+    // button, never a tool window or one that refuses the focus, and with a
+    // title. That rules out menus, tooltips, drop-downs and the floating
+    // tool windows Qt and others make, whoever's they are.
+    //
+    // It also needs a caption or a sizing border. Apps that draw their own
+    // title bar keep those styles and hide them; a bare frameless popup has
+    // neither, and a title alone proves nothing, since Qt gives an untitled
+    // window the application's name.
     w->title = windowTitle(hwnd);
-    if (forRing) {
-        // What Alt+Tab would show: an unowned window, or one that asks for a
-        // taskbar button, never a tool window, and with a title.
-        const LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        const bool owned = GetWindow(hwnd, GW_OWNER) != nullptr;
-        if ((ex & WS_EX_TOOLWINDOW) || (owned && !(ex & WS_EX_APPWINDOW)) || w->title.isEmpty())
-            return false;
-    }
+    const LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+    const LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    const bool owned = GetWindow(hwnd, GW_OWNER) != nullptr;
+    if ((ex & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) || (owned && !(ex & WS_EX_APPWINDOW)) || w->title.isEmpty()
+        || !(style & (WS_CAPTION | WS_THICKFRAME)))
+        return false;
 
     const QString path = processPath(pid, &w->created);
     w->exe = QFileInfo(path).fileName().toLower();

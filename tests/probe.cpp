@@ -39,6 +39,31 @@ int main(int argc, char *argv[])
     PlaceTracker tracker;
     tracker.start();
 
+    // --watch N: for N seconds, every change of the window in front and
+    // every change of place, to see which windows the hole would follow.
+    if (argc > 2 && qstrcmp(argv[1], "--watch") == 0) {
+        const auto describe = [](quintptr hwnd) {
+            wchar_t cls[128] = {}, title[128] = {};
+            GetClassNameW(HWND(hwnd), cls, 128);
+            GetWindowTextW(HWND(hwnd), title, 128);
+            return QStringLiteral("%1 %2 \"%3\"").arg(hwnd).arg(QString::fromWCharArray(cls), QString::fromWCharArray(title));
+        };
+        QObject::connect(&tracker, &PlaceTracker::placeChanged, [&](const Place &place) {
+            out << "place  " << place.key << " on " << describe(place.hwnd) << Qt::endl;
+        });
+        auto *poll = new QTimer(&app);
+        quintptr last = 0;
+        QObject::connect(poll, &QTimer::timeout, [&] {
+            const quintptr now = quintptr(GetForegroundWindow());
+            if (now != last)
+                out << "front  " << describe(now) << Qt::endl;
+            last = now;
+        });
+        poll->start(100);
+        QTimer::singleShot(QString::fromLatin1(argv[2]).toInt() * 1000, &app, &QCoreApplication::quit);
+        return app.exec();
+    }
+
     BrowserReader reader;
     QList<quintptr> browsers;
     EnumWindows(
