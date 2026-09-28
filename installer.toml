@@ -43,6 +43,11 @@ libraries are installed as separate DLLs beside WormholeNotes.exe and can be
 replaced.
 
 The complete source is at https://github.com/Locke-Werks/WormholeNotes
+
+Your notes are not encrypted. They are stored, backed up and exported as plain
+text that anyone or any program with access to your Windows account can read.
+Do not keep passwords or other secrets in them. You use WormholeNotes and trust
+it with your notes at your own risk.
 """
 
 # Windows 10 1809. The floor Qt 6.8 supports.
