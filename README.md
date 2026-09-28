@@ -63,6 +63,12 @@ Sheets are stored locally in `%LOCALAPPDATA%\Locke Werks\WormholeNotes\sheets.js
 Nothing is synced. A dated copy is kept in the `backups` folder beside it each day, the last 14 days,
 and Restore Notes in the tray menu brings one back.
 
+Notes are not encrypted. The sheets file, its backups and any export are plain
+text that anyone or any program with access to your Windows account can read.
+Do not keep passwords or other secrets in them. WormholeNotes comes with no
+warranty, as the GPLv3 sets out, and you use it and trust it with your notes
+at your own risk.
+
 Drag a note by its rim, or drag a hole with writing behind it, and a Tear off
 target appears at the foot of the screen; drop it there and the sheet becomes a
 small round note on the desktop. Right-click a note for Tear Off to Desktop,
