@@ -605,18 +605,23 @@ void NoteFace::wheelEvent(QWheelEvent *event)
         event->accept();
         return;
     }
-    // The wheel turns pages only; moving between sheets is a deliberate
-    // click, so scrolling never starts a blank one.
+    // The wheel turns the pages, and past the first or last page it moves on
+    // to the sheet before or after. It only ever reaches sheets that exist:
+    // starting a blank one stays a deliberate click on the arrow.
     m_wheel += delta;
     while (m_wheel >= 120) {
         m_wheel -= 120;
         if (m_page > 0)
             turn(-1);
+        else if (m_sheetIndex > 0)
+            emit sheetTurnRequested(-1);
     }
     while (m_wheel <= -120) {
         m_wheel += 120;
         if (m_page < m_layout.pageCount() - 1)
             turn(1);
+        else if (m_sheetIndex < m_sheetCount - 1)
+            emit sheetTurnRequested(1);
     }
     event->accept();
 }
