@@ -5,7 +5,7 @@
 
 [product]
 name         = "WormholeNotes"
-version      = "0.1.0"
+version      = "0.2.0"
 publisher    = "Locke Werks"
 description  = "A sticky note that tunnels through every window"
 copyright    = "Copyright (C) 2026 Locke Werks"

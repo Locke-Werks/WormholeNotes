@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "WormholeNotes",
   "description": "Tells WormholeNotes which page you are on, so each site gets its own notes.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmjAvTbAwyClk237+UwIsKIDwEhKJzuFKCL7NG13uPB4Q2g5hZYhzmnquvm+UhU2mTsbLbt3Vx6NiAQei0OvJQ6Qf4q+vqV9WXIE0Rthc1Q0ut+DQrNRxhk9kcDSkSegAcgmtFpVpMHb9ErY43xvny3eOTxf9176RlitYdefZj6hKsYv12q3sIjptEztHglfmgUxR8w57jeml+Src83kG4yQ5t6S1GTiqYO7qjwZNYmfWCKR7BlRPJWt4reWoL5tZpNH9pO7EjwjRfsXAF3BB48rbsiwsaibTt81i0JzjJudDm76nKF0zd1IkWrwE01fVWfmp8dl0+6Eji9HZ2nFE0QIDAQAB",
   "permissions": ["tabs", "nativeMessaging"],
   "background": { "service_worker": "background.js", "scripts": ["background.js"] },
